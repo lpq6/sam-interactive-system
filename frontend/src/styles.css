@@ -23,18 +23,21 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 #root {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* ── Layout ── */
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .header {
@@ -112,6 +115,7 @@ body {
   flex: 1;
   overflow: hidden;
   height: calc(100vh - 56px - 32px); /* 减去 header 和 footer 高度 */
+  min-height: 0; /* 防止 flex 子元素溢出 */
 }
 
 /* ── Toolbar ── */
@@ -125,6 +129,7 @@ body {
   gap: 0.75rem;
   overflow-y: auto;
   flex-shrink: 0;
+  max-height: 100%; /* 限制高度 */
 }
 
 .tool-section {
@@ -257,6 +262,7 @@ body {
     radial-gradient(circle at 50% 50%, rgba(99,102,241,0.05) 0%, transparent 50%),
     var(--bg);
   min-width: 0; /* 防止 flex 子元素溢出 */
+  min-height: 0; /* 防止 flex 子元素溢出 */
 }
 
 .canvas-container {
@@ -286,13 +292,14 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
-  padding: 2rem;
+  padding: 1.5rem;
   border: 2px dashed var(--border);
   border-radius: 16px;
   cursor: pointer;
   transition: all 0.3s;
-  max-width: 400px;
+  max-width: 350px;
   text-align: center;
+  max-height: 80%; /* 限制高度 */
 }
 
 .upload-zone:hover {
@@ -401,6 +408,7 @@ body {
   gap: 0.75rem;
   overflow-y: auto;
   flex-shrink: 0;
+  max-height: 100%; /* 限制高度 */
 }
 
 .result-card {

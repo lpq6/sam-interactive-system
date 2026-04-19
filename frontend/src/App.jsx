@@ -339,10 +339,10 @@ export default function App() {
       const resultsWidth = 280
       const headerHeight = 56
       const footerHeight = 32
-      const padding = 32
+      const padding = 48 // 增加内边距
       
-      const maxW = Math.min(window.innerWidth - toolbarWidth - resultsWidth - padding, 800)
-      const maxH = Math.min(window.innerHeight - headerHeight - footerHeight - padding, 600)
+      const maxW = Math.min(window.innerWidth - toolbarWidth - resultsWidth - padding, 700)
+      const maxH = Math.min(window.innerHeight - headerHeight - footerHeight - padding, 550)
       
       let w = img.width, h = img.height
       if (w > maxW) { h *= maxW / w; w = maxW }
