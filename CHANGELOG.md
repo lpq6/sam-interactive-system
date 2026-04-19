@@ -1,5 +1,40 @@
 # 更新日志 / CHANGELOG
 
+## [v1.11.0] - 2026-04-19
+
+### 🎬 视频/摄像头流分割
+
+#### 新增功能
+- ✅ 视频上传和帧提取
+- ✅ 视频帧分割（点击/框选）
+- ✅ 视频帧切换控制
+- ✅ 摄像头实时流
+- ✅ 摄像头列表查询
+- ✅ MJPEG 流支持
+- ✅ WebSocket 摄像头流
+
+#### API 端点
+- `POST /api/video/upload` - 上传视频文件
+- `GET /api/video/{video_id}/info` - 获取视频信息
+- `GET /api/video/{video_id}/frames` - 获取视频帧列表
+- `POST /api/video/segment/frame` - 分割视频帧
+- `GET /api/video/{video_id}/stream` - 视频流 (MJPEG)
+- `GET /api/camera/list` - 列出可用摄像头
+- `GET /api/camera/{camera_id}/stream` - 摄像头流 (MJPEG)
+- `WS /ws/camera/{camera_id}` - 摄像头 WebSocket
+
+#### 技术实现
+- 后端: VideoProcessor 类处理视频帧提取
+- 后端: CameraStream 类处理摄像头 WebSocket
+- 前端: videoMode 状态管理 (image/video/camera)
+- 前端: 帧切换和摄像头流显示
+
+#### 使用说明
+1. 点击"视频文件"按钮上传视频
+2. 使用帧控制滑块或按钮切换帧
+3. 对每帧进行分割操作
+4. 点击"摄像头"按钮启动实时流
+
 ## [v1.10.2] - 2026-04-19
 
 ### 🐛 修复界面滚动问题
