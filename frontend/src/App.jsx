@@ -23,52 +23,6 @@ export default function App() {
   const fileInputRef = useRef(null)
   const imgRef = useRef(null)
 
-  // ── Keyboard shortcuts ──
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      // Ignore if typing in input
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-      
-      switch (e.key) {
-        case '1':
-          setTool('point')
-          break
-        case '2':
-          setTool('box')
-          break
-        case 'd':
-        case 'D':
-          if (image && !loading) runAutoDetect()
-          break
-        case 's':
-        case 'S':
-          if (image && !loading) runAutoSegment()
-          break
-        case 'r':
-        case 'R':
-          if (image && !loading) runRecognize()
-          break
-        case 'c':
-        case 'C':
-          if (image && !loading) runExtractColors()
-          break
-        case 'Escape':
-          clearAll()
-          break
-        case 'z':
-        case 'Z':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault()
-            setPoints(prev => prev.slice(0, -1))
-          }
-          break
-      }
-    }
-    
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [image, loading, runAutoDetect, runAutoSegment, runRecognize, runExtractColors])
-
   // ── Health check ──
   useEffect(() => {
     fetch(`${API}/api/health`).then(r => r.json()).then(setHealth).catch(() => {})
@@ -380,6 +334,52 @@ export default function App() {
     img.src = `data:image/png;base64,${obj.color_image}`
     setSelectedColorObj(obj)
   }, [])
+
+  // ── Keyboard shortcuts ──
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ignore if typing in input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      
+      switch (e.key) {
+        case '1':
+          setTool('point')
+          break
+        case '2':
+          setTool('box')
+          break
+        case 'd':
+        case 'D':
+          if (image && !loading) runAutoDetect()
+          break
+        case 's':
+        case 'S':
+          if (image && !loading) runAutoSegment()
+          break
+        case 'r':
+        case 'R':
+          if (image && !loading) runRecognize()
+          break
+        case 'c':
+        case 'C':
+          if (image && !loading) runExtractColors()
+          break
+        case 'Escape':
+          clearAll()
+          break
+        case 'z':
+        case 'Z':
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault()
+            setPoints(prev => prev.slice(0, -1))
+          }
+          break
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [image, loading, runAutoDetect, runAutoSegment, runRecognize, runExtractColors])
 
   // ── Draw box on canvas ──
   const drawBox = box && !isDrawing ? null : null  // handled via CSS
