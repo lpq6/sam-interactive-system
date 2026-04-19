@@ -2637,13 +2637,28 @@ class CustomClassifier:
     def __init__(self):
         self.model = None
         self.classes = []  # 类别列表
+        # 基础 transform（用于推理）
         self.transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
+        # 数据增强 transform（用于训练）
+        self.train_transform = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.RandomCrop(224),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=0.3),
+            transforms.RandomRotation(15),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+            transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            transforms.RandomErasing(p=0.2, scale=(0.02, 0.1))
+        ])
         self.model_path = MODELS_DIR / "custom_classifier.pth"
         self.classes_path = MODELS_DIR / "custom_classes.json"
+        self.augmentation_enabled = True  # 是否启用数据增强
         self.load()
     
     def load(self):
@@ -2680,7 +2695,7 @@ class CustomClassifier:
             self.classes_path.write_text(json.dumps(self.classes, ensure_ascii=False), encoding='utf-8')
             print(f"[OK] 自定义分类器已保存: {self.classes}")
     
-    def train(self, samples: List[dict], epochs: int = 10, lr: float = 0.001):
+    def train(self, samples: List[dict], epochs: int = 10, lr: float = 0.001, augment: bool = True):
         """
         训练分类器
         
@@ -2688,6 +2703,7 @@ class CustomClassifier:
             samples: [{"image": base64, "label": "类别名"}, ...]
             epochs: 训练轮数
             lr: 学习率
+            augment: 是否启用数据增强
         
         返回:
             训练结果
@@ -2703,13 +2719,24 @@ class CustomClassifier:
         images = []
         labels = []
         
+        # 选择 transform
+        current_transform = self.train_transform if augment else self.transform
+        
         for sample in samples:
             try:
                 img_bytes = base64.b64decode(sample["image"])
                 img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-                tensor = self.transform(img)
+                tensor = current_transform(img)
                 images.append(tensor)
                 labels.append(self.classes.index(sample["label"]))
+                
+                # 数据增强：为每个样本生成额外的增强样本
+                if augment and self.augmentation_enabled:
+                    # 生成 2 个额外的增强样本
+                    for _ in range(2):
+                        augmented_tensor = self.train_transform(img)
+                        images.append(augmented_tensor)
+                        labels.append(self.classes.index(sample["label"]))
             except Exception as e:
                 print(f"[WARN] 处理样本失败: {e}")
                 continue
@@ -2768,7 +2795,7 @@ class CustomClassifier:
             "losses": losses
         }
     
-    def train_from_images(self, image_ids: List[str], labels: List[str], epochs: int = 10, lr: float = 0.001):
+    def train_from_images(self, image_ids: List[str], labels: List[str], epochs: int = 10, lr: float = 0.001, augment: bool = True):
         """
         从图片批量训练分类器
         
@@ -2777,6 +2804,7 @@ class CustomClassifier:
             labels: 对应的类别标签列表
             epochs: 训练轮数
             lr: 学习率
+            augment: 是否启用数据增强
         
         返回:
             训练结果
@@ -2795,6 +2823,9 @@ class CustomClassifier:
         images = []
         label_indices = []
         
+        # 选择 transform
+        current_transform = self.train_transform if augment else self.transform
+        
         for img_id, label in zip(image_ids, labels):
             try:
                 path = find_image(img_id)
@@ -2803,9 +2834,17 @@ class CustomClassifier:
                     continue
                 
                 img = Image.open(path).convert('RGB')
-                tensor = self.transform(img)
+                tensor = current_transform(img)
                 images.append(tensor)
                 label_indices.append(self.classes.index(label))
+                
+                # 数据增强：为每个样本生成额外的增强样本
+                if augment and self.augmentation_enabled:
+                    # 生成 2 个额外的增强样本
+                    for _ in range(2):
+                        augmented_tensor = self.train_transform(img)
+                        images.append(augmented_tensor)
+                        label_indices.append(self.classes.index(label))
             except Exception as e:
                 print(f"[WARN] 处理图片失败 {img_id}: {e}")
                 continue
@@ -2895,6 +2934,7 @@ class TrainRequest(BaseModel):
     samples: List[dict]  # [{"image": base64, "label": "类别名"}, ...]
     epochs: int = 10
     lr: float = 0.001
+    augment: bool = True  # 是否启用数据增强
 
 @app.post("/api/custom/train")
 async def custom_train(req: TrainRequest):
@@ -2905,17 +2945,19 @@ async def custom_train(req: TrainRequest):
         samples: 训练样本列表 [{"image": base64, "label": "类别名"}, ...]
         epochs: 训练轮数（默认10）
         lr: 学习率（默认0.001）
+        augment: 是否启用数据增强（默认true）
     
     返回:
         训练结果
     """
-    result = custom_classifier.train(req.samples, req.epochs, req.lr)
+    result = custom_classifier.train(req.samples, req.epochs, req.lr, req.augment)
     return result
 
 class BatchTrainRequest(BaseModel):
     images: List[dict]  # [{"image_id": "xxx", "label": "类别名"}, ...]
     epochs: int = 10
     lr: float = 0.001
+    augment: bool = True  # 是否启用数据增强
 
 @app.post("/api/custom/batch-train")
 async def custom_batch_train(req: BatchTrainRequest):
@@ -2926,6 +2968,7 @@ async def custom_batch_train(req: BatchTrainRequest):
         images: 图片列表 [{"image_id": "xxx", "label": "类别名"}, ...]
         epochs: 训练轮数（默认10）
         lr: 学习率（默认0.001）
+        augment: 是否启用数据增强（默认true）
     
     返回:
         训练结果
@@ -2933,7 +2976,7 @@ async def custom_batch_train(req: BatchTrainRequest):
     image_ids = [img["image_id"] for img in req.images]
     labels = [img["label"] for img in req.images]
     
-    result = custom_classifier.train_from_images(image_ids, labels, req.epochs, req.lr)
+    result = custom_classifier.train_from_images(image_ids, labels, req.epochs, req.lr, req.augment)
     return result
 
 @app.get("/api/custom/classes")
@@ -2978,6 +3021,33 @@ async def custom_predict(image_id: str = None):
         "predictions": results,
         "top_class": results[0]["label"] if results else None,
         "top_prob": results[0]["prob"] if results else 0
+    }
+
+@app.get("/api/custom/augmentation")
+async def get_augmentation_status():
+    """获取数据增强状态"""
+    return {
+        "success": True,
+        "enabled": custom_classifier.augmentation_enabled,
+        "transforms": [
+            "RandomCrop",
+            "RandomHorizontalFlip",
+            "RandomVerticalFlip",
+            "RandomRotation",
+            "ColorJitter",
+            "RandomAffine",
+            "RandomErasing"
+        ]
+    }
+
+@app.post("/api/custom/augmentation/toggle")
+async def toggle_augmentation():
+    """切换数据增强状态"""
+    custom_classifier.augmentation_enabled = not custom_classifier.augmentation_enabled
+    return {
+        "success": True,
+        "enabled": custom_classifier.augmentation_enabled,
+        "message": f"数据增强已{'启用' if custom_classifier.augmentation_enabled else '禁用'}"
     }
 
 @app.post("/api/custom/classify-object")

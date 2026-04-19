@@ -57,6 +57,7 @@ export default function App() {
   const [customClasses, setCustomClasses] = useState([])  // 已训练的类别列表
   const [evaluationResult, setEvaluationResult] = useState(null)  // 模型评估结果
   const [batchLabels, setBatchLabels] = useState([])  // 批量训练的标签数组
+  const [augmentationEnabled, setAugmentationEnabled] = useState(true)  // 数据增强开关
   
   // 原图备份（用于恢复）
   const [originalImage, setOriginalImage] = useState(null)  // 原始图片数据
@@ -2147,6 +2148,72 @@ export default function App() {
                 })}
               </div>
             )}
+
+            {/* 数据增强开关 */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '0.5rem',
+              background: 'var(--bg-tertiary)',
+              borderRadius: '6px',
+              marginBottom: '0.5rem'
+            }}>
+              <div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text)' }}>🎨 数据增强</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  提升模型泛化能力
+                </div>
+              </div>
+              <label style={{
+                position: 'relative',
+                display: 'inline-block',
+                width: '44px',
+                height: '24px'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={augmentationEnabled}
+                  onChange={async () => {
+                    try {
+                      const res = await fetch(`${API}/api/custom/augmentation/toggle`, {
+                        method: 'POST'
+                      })
+                      const data = await res.json()
+                      if (data.success) {
+                        setAugmentationEnabled(data.enabled)
+                      }
+                    } catch (e) {
+                      console.error('切换数据增强失败:', e)
+                    }
+                  }}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span style={{
+                  position: 'absolute',
+                  cursor: 'pointer',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: augmentationEnabled ? 'var(--primary)' : 'var(--bg-hover)',
+                  borderRadius: '24px',
+                  transition: '0.3s'
+                }}>
+                  <span style={{
+                    position: 'absolute',
+                    content: '""',
+                    height: '18px',
+                    width: '18px',
+                    left: augmentationEnabled ? '23px' : '3px',
+                    bottom: '3px',
+                    backgroundColor: 'white',
+                    borderRadius: '50%',
+                    transition: '0.3s'
+                  }} />
+                </span>
+              </label>
+            </div>
 
             {/* 训练按钮 */}
             <button
