@@ -450,10 +450,10 @@ async def auto_detect(req: AutoDetectRequest):
                         except:
                             pass
 
-                    # 如果 ResNet 识别置信度太低，用颜色分类
-                    if region_prob < 0.05:
-                        region_mean = img[mask].mean(axis=0)
-                        region_label = classify_region(region_mean, area, img.shape)
+                    # 跳过低置信度的泛化标签
+                    generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
+                    if region_prob < 0.15 or region_label in generic_labels:
+                        continue
 
                     # 叠加颜色
                     color = colors[detection_id % len(colors)]
@@ -577,22 +577,19 @@ async def auto_segment(req: AutoSegmentRequest):
                             # 裁剪区域，保留一些边距
                             margin = 5
                             crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
-                            print(f"[DEBUG] Crop shape: {crop.shape}, size: {crop.size}")
                             if crop.size > 0:
                                 crop_pil = Image.fromarray(crop)
                                 result = classifier.classify(crop_pil, top_k=1)
-                                print(f"[DEBUG] Classify result: {result}")
                                 if result:
                                     region_label = result[0]["label"]
                                     region_prob = result[0]["prob"]
-                                    print(f"[DEBUG] Label: {region_label}, Prob: {region_prob}")
                         except Exception as e:
-                            print(f"[DEBUG] Exception: {e}")
+                            pass
 
-                    # 如果 ResNet 识别置信度太低，用颜色分类
-                    if region_prob < 0.05:
-                        region_mean = img[mask].mean(axis=0)
-                        region_label = classify_region(region_mean, area, img.shape)
+                    # 跳过低置信度的泛化标签
+                    generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
+                    if region_prob < 0.15 or region_label in generic_labels:
+                        continue
 
                     # 叠加颜色
                     color = colors[detection_id % len(colors)]
@@ -921,16 +918,17 @@ async def extract_color_object(image_id: str, mask_base64: str = None, bbox: str
 
 
 @app.post("/api/extract/all")
-async def extract_all_objects(image_id: str, min_area: int = 500):
+async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence: float = 0.3):
     """
-    批量提取所有彩色物体
+    批量提取高置信度彩色物体
     
     参数:
         image_id: 图片ID
         min_area: 最小区域面积（默认500）
+        min_confidence: 最低置信度阈值（默认0.3，即30%）
     
     返回:
-        所有检测到的彩色物体列表
+        置信度高于阈值的彩色物体列表
     """
     path = find_image(image_id)
     if not path:
@@ -938,6 +936,9 @@ async def extract_all_objects(image_id: str, min_area: int = 500):
     
     img = np.array(Image.open(path).convert("RGB"))
     h, w = img.shape[:2]
+    
+    # 不要这些泛化标签
+    generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
     
     try:
         sam.set_image(img)
@@ -948,14 +949,10 @@ async def extract_all_objects(image_id: str, min_area: int = 500):
         
         objects = []
         used_masks = []
-        colors = [
-            [255, 0, 0], [0, 255, 0], [0, 0, 255],
-            [255, 255, 0], [255, 0, 255], [0, 255, 255]
-        ]
         
         for y in range(step//2, h, step):
             for x in range(step//2, w, step):
-                if len(objects) >= 15:
+                if len(objects) >= 20:
                     break
                 
                 try:
@@ -986,6 +983,27 @@ async def extract_all_objects(image_id: str, min_area: int = 500):
                     ys, xs = np.where(mask)
                     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
                     
+                    # 用 ResNet 识别该区域
+                    region_label = "未知"
+                    region_prob = 0.0
+                    if classifier.model:
+                        try:
+                            x1, y1, x2, y2 = bbox
+                            margin = 5
+                            crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
+                            if crop.size > 0:
+                                crop_pil = Image.fromarray(crop)
+                                result = classifier.classify(crop_pil, top_k=1)
+                                if result:
+                                    region_label = result[0]["label"]
+                                    region_prob = result[0]["prob"]
+                        except:
+                            pass
+                    
+                    # 跳过低置信度和泛化标签的物体
+                    if region_prob < min_confidence or region_label in generic_labels:
+                        continue
+                    
                     # 提取彩色物体（透明背景）
                     rgba = np.zeros((h, w, 4), dtype=np.uint8)
                     rgba[:, :, :3] = img
@@ -1007,26 +1025,6 @@ async def extract_all_objects(image_id: str, min_area: int = 500):
                     mask_buffer = io.BytesIO()
                     mask_img.save(mask_buffer, format='PNG')
                     mask_b64 = base64.b64encode(mask_buffer.getvalue()).decode()
-                    
-                    # 用 ResNet 识别该区域
-                    region_label = "未知"
-                    region_prob = 0.0
-                    if classifier.model:
-                        try:
-                            margin = 5
-                            crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
-                            if crop.size > 0:
-                                crop_pil = Image.fromarray(crop)
-                                result = classifier.classify(crop_pil, top_k=1)
-                                if result:
-                                    region_label = result[0]["label"]
-                                    region_prob = result[0]["prob"]
-                        except:
-                            pass
-                    
-                    if region_prob < 0.05:
-                        region_mean = img[mask].mean(axis=0)
-                        region_label = classify_region(region_mean, area, img.shape)
                     
                     objects.append({
                         "id": len(objects) + 1,
