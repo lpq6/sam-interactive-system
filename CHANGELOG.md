@@ -1,5 +1,31 @@
 # 更新日志 / CHANGELOG
 
+## [v1.13.0] - 2026-04-19
+
+### 🎯 自定义类别训练
+
+#### 新增功能
+- ✅ CustomClassifier 类 (基于 ResNet18)
+- ✅ 训练端点 (`/api/custom/train`)
+- ✅ 类别查询端点 (`/api/custom/classes`)
+- ✅ 预测端点 (`/api/custom/predict`)
+- ✅ 物体分类端点 (`/api/custom/classify-object`)
+- ✅ 前端自定义训练 UI
+
+#### 使用流程
+1. **添加类别**: 在"自定义训练"面板输入类别名称，点击"添加"
+2. **添加样本**: 对图片进行分割后，点击类别按钮将分割结果添加为训练样本
+3. **准备数据**: 每个类别至少需要 2 个样本
+4. **开始训练**: 点击"开始训练"按钮（使用 ResNet18 预训练模型微调）
+5. **使用模型**: 训练完成后可对新图片进行分类预测
+
+#### 技术细节
+- 基础模型: ResNet18 (预训练)
+- 训练方式: 迁移学习 (微调最后一层)
+- 默认参数: 10 epochs, lr=0.001
+- 模型保存: `backend/models/custom_classifier.pth`
+- 类别保存: `backend/models/custom_classes.json`
+
 ## [v1.12.0] - 2026-04-19
 
 ### 📦 标注导出（COCO/YOLO）
