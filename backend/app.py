@@ -467,15 +467,46 @@ async def health():
 
 @app.get("/api/models")
 async def list_models():
+    import glob
     available = []
     for name, file in [("vit_b","SAM ViT-B (375MB)"),("vit_l","SAM ViT-L (1.2GB)"),("vit_h","SAM ViT-H (2.4GB)")]:
+        # 检查模型文件是否存在
+        model_exists = False
+        if MODELS_DIR.exists():
+            pattern = str(MODELS_DIR / f"sam_{name}_*.pth")
+            model_exists = len(glob.glob(pattern)) > 0
+        
         available.append({
             "id": name,
             "name": file,
             "loaded": sam.model_type == name,
-            "exists": (MODELS_DIR / f"sam_{name}_*.pth").exists() if MODELS_DIR.exists() else False
+            "exists": model_exists
         })
     return {"models": available, "current": sam.model_type, "device": sam.device}
+
+@app.post("/api/models/switch")
+async def switch_model(model: dict):
+    model_type = model.get("model_type")
+    if model_type not in ["vit_b", "vit_l", "vit_h"]:
+        raise HTTPException(400, "无效的模型类型")
+    
+    if sam.model_type == model_type:
+        return {"success": True, "message": f"模型 {model_type} 已加载", "model_type": model_type}
+    
+    # 检查模型文件是否存在
+    if MODELS_DIR.exists():
+        import glob
+        pattern = str(MODELS_DIR / f"sam_{model_type}_*.pth")
+        matches = glob.glob(pattern)
+        if not matches:
+            raise HTTPException(404, f"模型文件不存在: {model_type}")
+    
+    # 加载新模型
+    success = sam.load_model(model_type)
+    if success:
+        return {"success": True, "message": f"已切换到 {model_type}", "model_type": model_type, "device": sam.device}
+    else:
+        raise HTTPException(500, f"加载模型失败: {model_type}")
 
 @app.post("/api/upload")
 async def upload_image(file: UploadFile = File(...)):

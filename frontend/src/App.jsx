@@ -19,6 +19,11 @@ export default function App() {
   const [selectedColorObj, setSelectedColorObj] = useState(null)
   const [theme, setTheme] = useState('dark')        // dark | light
   
+  // 模型切换状态
+  const [currentModel, setCurrentModel] = useState('vit_b')
+  const [availableModels, setAvailableModels] = useState([])
+  const [switchingModel, setSwitchingModel] = useState(false)
+  
   // 掩码编辑状态
   const [brushMode, setBrushMode] = useState('add')  // add | erase
   const [brushSize, setBrushSize] = useState(15)
@@ -37,7 +42,37 @@ export default function App() {
   // ── Health check ──
   useEffect(() => {
     fetch(`${API}/api/health`).then(r => r.json()).then(setHealth).catch(() => {})
+    // 获取可用模型
+    fetch(`${API}/api/models`).then(r => r.json()).then(data => {
+      setAvailableModels(data.models || [])
+      setCurrentModel(data.current || 'vit_b')
+    }).catch(() => {})
   }, [])
+
+  // ── 切换模型 ──
+  const switchSAMModel = useCallback(async (modelType) => {
+    if (switchingModel || modelType === currentModel) return
+    setSwitchingModel(true)
+    try {
+      const res = await fetch(`${API}/api/models/switch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_type: modelType })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setCurrentModel(modelType)
+        // 重新获取模型列表
+        const modelsRes = await fetch(`${API}/api/models`)
+        const modelsData = await modelsRes.json()
+        setAvailableModels(modelsData.models || [])
+        alert(`✓ 已切换到 ${modelType.toUpperCase()}`)
+      }
+    } catch (e) {
+      alert('切换模型失败: ' + e.message)
+    }
+    setSwitchingModel(false)
+  }, [currentModel, switchingModel])
 
   // ── Image upload ──
   const handleUpload = useCallback(async (file) => {
@@ -623,6 +658,34 @@ export default function App() {
       <div className="main-content">
         {/* Toolbar */}
         <aside className="toolbar">
+          {/* Model Selector */}
+          <div className="tool-section">
+            <h3>🧠 SAM 模型</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {availableModels.map(model => (
+                <button
+                  key={model.id}
+                  className={`btn ${currentModel === model.id ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                  onClick={() => switchSAMModel(model.id)}
+                  disabled={switchingModel}
+                  style={{ 
+                    justifyContent: 'space-between',
+                    opacity: model.exists ? 1 : 0.5
+                  }}
+                >
+                  <span>{model.name}</span>
+                  {!model.exists && <span style={{ fontSize: '0.7rem' }}>⚠️ 未下载</span>}
+                  {currentModel === model.id && <span style={{ fontSize: '0.7rem' }}>✓</span>}
+                </button>
+              ))}
+              {switchingModel && (
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                  ⏳ 切换中...
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Tools */}
           <div className="tool-section">
             <h3>🔧 功能模式</h3>
