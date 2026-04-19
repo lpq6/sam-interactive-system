@@ -301,8 +301,6 @@ export default function App() {
       handleBrushEdit(Math.round(ox), Math.round(oy))
     }
   }, [tool, currentMask, handleBrushEdit])
-    setPoints(prev => [...prev, { x: ox, y: oy, label, dx, dy }])
-  }, [tool])
 
   // ── Box drawing ──
   const handleMouseDown = useCallback((e) => {
@@ -389,13 +387,17 @@ export default function App() {
   }, [image, tool, points, box, fetchHistory])
 
   // ── Clear ──
-  const clearAll = () => {
+  const clearAll = useCallback(() => {
     setPoints([])
     setBox(null)
     setResult(null)
     setDetectResult(null)
     setRecognizeResult(null)
     setAutoSegResult(null)
+    setColorObjects(null)
+    setSelectedColorObj(null)
+    setCurrentMask(null)
+    setBrushStrokes([])
     // 清空 overlay canvas
     if (overlayRef.current) {
       overlayRef.current.getContext('2d').clearRect(0, 0, overlayRef.current.width, overlayRef.current.height)
@@ -407,7 +409,7 @@ export default function App() {
       ctx.clearRect(0, 0, dw, dh)
       ctx.drawImage(el, 0, 0, dw, dh)
     }
-  }
+  }, [])
 
   // ── Auto Detect (自动检测所有物体) ──
   const runAutoDetect = useCallback(async () => {
@@ -585,7 +587,7 @@ export default function App() {
     
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [image, loading, runAutoDetect, runAutoSegment, runRecognize, runExtractColors])
+  }, [image, loading, runAutoDetect, runAutoSegment, runRecognize, runExtractColors, clearAll])
 
   // ── Draw box on canvas ──
   const drawBox = box && !isDrawing ? null : null  // handled via CSS
