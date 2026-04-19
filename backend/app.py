@@ -2980,6 +2980,134 @@ async def get_training_history():
         "model_path": str(custom_classifier.model_path)
     }
 
+@app.get("/api/custom/export")
+async def export_custom_model():
+    """
+    导出自定义分类器模型
+    
+    返回:
+        模型文件 (ZIP 包含模型和类别)
+    """
+    if custom_classifier.model is None:
+        raise HTTPException(400, "模型未训练")
+    
+    import tempfile
+    import zipfile
+    
+    # 创建临时 ZIP 文件
+    temp_zip = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
+    temp_zip.close()
+    
+    with zipfile.ZipFile(temp_zip.name, 'w') as zf:
+        # 写入模型文件
+        if custom_classifier.model_path.exists():
+            zf.write(custom_classifier.model_path, "model.pth")
+        
+        # 写入类别文件
+        if custom_classifier.classes_path.exists():
+            zf.write(custom_classifier.classes_path, "classes.json")
+        
+        # 写入元数据
+        metadata = {
+            "model_type": "resnet18",
+            "classes": custom_classifier.classes,
+            "num_classes": len(custom_classifier.classes),
+            "export_time": str(datetime.now())
+        }
+        zf.writestr("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2))
+    
+    return FileResponse(
+        temp_zip.name,
+        media_type="application/zip",
+        filename=f"custom_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+        background=lambda: os.unlink(temp_zip.name)
+    )
+
+@app.post("/api/custom/import")
+async def import_custom_model(file: UploadFile = File(...)):
+    """
+    导入自定义分类器模型
+    
+    参数:
+        file: 模型 ZIP 文件
+    
+    返回:
+        导入结果
+    """
+    import zipfile
+    import tempfile
+    
+    if not file.filename.endswith('.zip'):
+        raise HTTPException(400, "请上传 ZIP 文件")
+    
+    try:
+        # 保存上传文件
+        content = await file.read()
+        temp_zip = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
+        temp_zip.write(content)
+        temp_zip.close()
+        
+        # 解压文件
+        with zipfile.ZipFile(temp_zip.name, 'r') as zf:
+            # 检查必要文件
+            required_files = ['model.pth', 'classes.json']
+            for f in required_files:
+                if f not in zf.namelist():
+                    raise HTTPException(400, f"ZIP 文件缺少 {f}")
+            
+            # 提取文件
+            zf.extract('model.pth', str(MODELS_DIR))
+            zf.extract('classes.json', str(MODELS_DIR))
+            
+            # 读取元数据
+            metadata = {}
+            if 'metadata.json' in zf.namelist():
+                metadata = json.loads(zf.read('metadata.json'))
+        
+        # 清理临时文件
+        os.unlink(temp_zip.name)
+        
+        # 重新加载模型
+        custom_classifier.load()
+        
+        return {
+            "success": True,
+            "classes": custom_classifier.classes,
+            "metadata": metadata,
+            "message": f"成功导入模型，类别: {', '.join(custom_classifier.classes)}"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/custom/model-info")
+async def get_custom_model_info():
+    """
+    获取自定义模型信息
+    
+    返回:
+        模型详细信息
+    """
+    if custom_classifier.model is None:
+        return {
+            "success": True,
+            "has_model": False,
+            "classes": [],
+            "message": "模型未训练"
+        }
+    
+    # 获取模型文件信息
+    model_size = custom_classifier.model_path.stat().st_size if custom_classifier.model_path.exists() else 0
+    
+    return {
+        "success": True,
+        "has_model": True,
+        "classes": custom_classifier.classes,
+        "num_classes": len(custom_classifier.classes),
+        "model_path": str(custom_classifier.model_path),
+        "model_size_mb": round(model_size / 1024 / 1024, 2),
+        "classes_path": str(custom_classifier.classes_path)
+    }
+
 # ── 启动 ──
 # 尝试加载默认模型
 MODELS_DIR.mkdir(exist_ok=True)

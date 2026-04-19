@@ -2355,6 +2355,109 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {/* 模型导出/导入 */}
+            {customClasses.length > 0 && (
+              <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+                <h4 style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>💾 模型导出/导入</h4>
+                
+                {/* 导出按钮 */}
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={async () => {
+                    try {
+                      const a = document.createElement('a')
+                      a.href = `${API}/api/custom/export`
+                      a.download = `custom_model_${new Date().toISOString().slice(0, 10)}.zip`
+                      a.click()
+                    } catch (e) {
+                      alert(`导出失败: ${e.message}`)
+                    }
+                  }}
+                  style={{ width: '100%', marginBottom: '0.5rem' }}
+                >
+                  📦 导出模型
+                </button>
+
+                {/* 导入按钮 */}
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="file"
+                    accept=".zip"
+                    onChange={async (e) => {
+                      const file = e.target.files[0]
+                      if (!file) return
+                      
+                      try {
+                        const formData = new FormData()
+                        formData.append('file', file)
+                        
+                        const res = await fetch(`${API}/api/custom/import`, {
+                          method: 'POST',
+                          body: formData
+                        })
+                        const data = await res.json()
+                        
+                        if (data.success) {
+                          alert(`导入成功!\n类别: ${data.classes.join(', ')}`)
+                          setCustomClasses(data.classes)
+                        } else {
+                          alert(`导入失败: ${data.error}`)
+                        }
+                      } catch (e) {
+                        alert(`导入失败: ${e.message}`)
+                      }
+                      
+                      // 清空文件输入
+                      e.target.value = ''
+                    }}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: '100%',
+                      opacity: 0,
+                      cursor: 'pointer'
+                    }}
+                  />
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ width: '100%' }}
+                  >
+                    📥 导入模型
+                  </button>
+                </div>
+
+                {/* 模型信息 */}
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={async () => {
+                    try {
+                      const res = await fetch(`${API}/api/custom/model-info`)
+                      const data = await res.json()
+                      
+                      if (data.success && data.has_model) {
+                        alert(
+                          `模型信息:\n` +
+                          `类别: ${data.classes.join(', ')}\n` +
+                          `类别数: ${data.num_classes}\n` +
+                          `模型大小: ${data.model_size_mb} MB\n` +
+                          `模型路径: ${data.model_path}`
+                        )
+                      } else {
+                        alert('模型未训练')
+                      }
+                    } catch (e) {
+                      alert(`获取信息失败: ${e.message}`)
+                    }
+                  }}
+                  style={{ width: '100%', marginTop: '0.5rem' }}
+                >
+                  ℹ️ 模型信息
+                </button>
+              </div>
+            )}
           </div>
         </aside>
       </div>
