@@ -380,6 +380,66 @@ class MaskHistory:
         self.history = []
         self.current = -1
 
+
+# ── 分割历史记录 ──
+class SegmentationHistory:
+    def __init__(self, max_size: int = 50):
+        self.history = []  # [{"id", "timestamp", "tool", "points", "box", "mask", "overlay", "score", "area", "label"}]
+        self.max_size = max_size
+        self.next_id = 1
+    
+    def add(self, tool: str, mask_b64: str, overlay_b64: str, score: float, 
+            area: int, label: str = None, points: List = None, box: List = None) -> dict:
+        """添加分割结果到历史"""
+        import time
+        entry = {
+            "id": self.next_id,
+            "timestamp": int(time.time() * 1000),
+            "tool": tool,
+            "points": points or [],
+            "box": box or [],
+            "mask": mask_b64,
+            "overlay": overlay_b64,
+            "score": score,
+            "area": area,
+            "label": label or "分割区域"
+        }
+        self.next_id += 1
+        self.history.append(entry)
+        
+        # 限制历史大小
+        if len(self.history) > self.max_size:
+            self.history.pop(0)
+        
+        return entry
+    
+    def get_all(self) -> List[dict]:
+        """获取所有历史记录"""
+        return self.history.copy()
+    
+    def get_by_id(self, entry_id: int) -> Optional[dict]:
+        """根据 ID 获取历史记录"""
+        for entry in self.history:
+            if entry["id"] == entry_id:
+                return entry
+        return None
+    
+    def delete(self, entry_id: int) -> bool:
+        """删除历史记录"""
+        for i, entry in enumerate(self.history):
+            if entry["id"] == entry_id:
+                self.history.pop(i)
+                return True
+        return False
+    
+    def clear(self):
+        """清空历史"""
+        self.history = []
+        self.next_id = 1
+
+# 全局分割历史记录
+segmentation_histories = {}  # image_id -> SegmentationHistory
+
 # 全局掩码历史记录
 mask_histories = {}  # image_id -> MaskHistory
 
@@ -620,14 +680,47 @@ async def segment_by_point(req: PointPrompt):
     rgba_img.save(rgba_buf, format="PNG")
     rgba_b64 = base64.b64encode(rgba_buf.getvalue()).decode()
 
+    # 生成叠加图
+    overlay_b64 = create_overlay(img, mask)
+    
+    # 保存到历史记录
+    if req.image_id not in segmentation_histories:
+        segmentation_histories[req.image_id] = SegmentationHistory()
+    
+    # 尝试识别物体标签
+    label = "分割区域"
+    if classifier.model:
+        try:
+            x1, y1, x2, y2 = bbox
+            margin = 5
+            crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
+            if crop.size > 0:
+                crop_pil = Image.fromarray(crop)
+                result = classifier.classify(crop_pil, top_k=1)
+                if result:
+                    label = result[0]["label"]
+        except:
+            pass
+    
+    history_entry = segmentation_histories[req.image_id].add(
+        tool="point",
+        mask_b64=smooth_mask_b64,
+        overlay_b64=overlay_b64,
+        score=float(scores[best]),
+        area=int(mask.sum()),
+        label=label,
+        points=req.points
+    )
+
     return {
         "success": True,
         "mask": smooth_mask_b64,  # 平滑掩码
         "color_image": rgba_b64,  # 平滑彩色图像
-        "overlay": create_overlay(img, mask),
+        "overlay": overlay_b64,
         "score": float(scores[best]),
         "bbox": bbox,
-        "area": int(mask.sum())
+        "area": int(mask.sum()),
+        "history_id": history_entry["id"]
     }
 
 @app.post("/api/segment/box")
@@ -637,6 +730,7 @@ async def segment_by_box(req: BoxPrompt):
         raise HTTPException(404, "请先上传图片")
 
     img = np.array(Image.open(path).convert("RGB"))
+    h, w = img.shape[:2]
     sam.set_image(img)
 
     box = np.array(req.box)
@@ -662,14 +756,47 @@ async def segment_by_box(req: BoxPrompt):
     rgba_img.save(rgba_buf, format="PNG")
     rgba_b64 = base64.b64encode(rgba_buf.getvalue()).decode()
 
+    # 生成叠加图
+    overlay_b64 = create_overlay(img, mask)
+    
+    # 保存到历史记录
+    if req.image_id not in segmentation_histories:
+        segmentation_histories[req.image_id] = SegmentationHistory()
+    
+    # 尝试识别物体标签
+    label = "分割区域"
+    if classifier.model:
+        try:
+            x1, y1, x2, y2 = bbox
+            margin = 5
+            crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
+            if crop.size > 0:
+                crop_pil = Image.fromarray(crop)
+                result = classifier.classify(crop_pil, top_k=1)
+                if result:
+                    label = result[0]["label"]
+        except:
+            pass
+    
+    history_entry = segmentation_histories[req.image_id].add(
+        tool="box",
+        mask_b64=smooth_mask_b64,
+        overlay_b64=overlay_b64,
+        score=float(scores[best]),
+        area=int(mask.sum()),
+        label=label,
+        box=req.box
+    )
+
     return {
         "success": True,
         "mask": smooth_mask_b64,  # 平滑掩码
         "color_image": rgba_b64,  # 平滑彩色图像
-        "overlay": create_overlay(img, mask),
+        "overlay": overlay_b64,
         "score": float(scores[best]),
         "bbox": bbox,
-        "area": int(mask.sum())
+        "area": int(mask.sum()),
+        "history_id": history_entry["id"]
     }
 
 @app.post("/api/segment/multi")
@@ -1510,6 +1637,104 @@ async def redo_mask(req: MaskUndoRequest):
         "can_undo": mask_histories[req.image_id].current > 0,
         "can_redo": mask_histories[req.image_id].current < len(mask_histories[req.image_id].history) - 1
     }
+
+
+# ── 分割历史记录 API ──
+class HistoryRequest(BaseModel):
+    image_id: str
+
+class HistoryGetRequest(BaseModel):
+    image_id: str
+    entry_id: int
+
+@app.get("/api/history/{image_id}")
+async def get_history(image_id: str):
+    """
+    获取图片的分割历史记录
+    
+    参数:
+        image_id: 图片 ID
+    
+    返回:
+        历史记录列表
+    """
+    if image_id not in segmentation_histories:
+        return {"success": True, "history": [], "count": 0}
+    
+    history = segmentation_histories[image_id].get_all()
+    # 返回简化的记录（不含完整的 mask/overlay 数据）
+    simplified = []
+    for entry in history:
+        simplified.append({
+            "id": entry["id"],
+            "timestamp": entry["timestamp"],
+            "tool": entry["tool"],
+            "label": entry["label"],
+            "score": entry["score"],
+            "area": entry["area"],
+            "bbox": entry.get("bbox")
+        })
+    
+    return {"success": True, "history": simplified, "count": len(simplified)}
+
+@app.post("/api/history/get")
+async def get_history_entry(req: HistoryGetRequest):
+    """
+    获取单条历史记录详情
+    
+    参数:
+        image_id: 图片 ID
+        entry_id: 记录 ID
+    
+    返回:
+        完整的历史记录（包含 mask 和 overlay）
+    """
+    if req.image_id not in segmentation_histories:
+        return {"success": False, "error": "没有历史记录"}
+    
+    entry = segmentation_histories[req.image_id].get_by_id(req.entry_id)
+    if entry is None:
+        return {"success": False, "error": "记录不存在"}
+    
+    return {"success": True, "entry": entry}
+
+@app.delete("/api/history/{image_id}/{entry_id}")
+async def delete_history_entry(image_id: str, entry_id: int):
+    """
+    删除单条历史记录
+    
+    参数:
+        image_id: 图片 ID
+        entry_id: 记录 ID
+    
+    返回:
+        删除结果
+    """
+    if image_id not in segmentation_histories:
+        return {"success": False, "error": "没有历史记录"}
+    
+    deleted = segmentation_histories[image_id].delete(entry_id)
+    if not deleted:
+        return {"success": False, "error": "记录不存在"}
+    
+    return {"success": True}
+
+@app.delete("/api/history/{image_id}")
+async def clear_history(image_id: str):
+    """
+    清空图片的所有历史记录
+    
+    参数:
+        image_id: 图片 ID
+    
+    返回:
+        清空结果
+    """
+    if image_id not in segmentation_histories:
+        return {"success": True}
+    
+    segmentation_histories[image_id].clear()
+    return {"success": True}
 
 
 # ── 启动 ──

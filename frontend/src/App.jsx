@@ -24,6 +24,10 @@ export default function App() {
   const [brushSize, setBrushSize] = useState(15)
   const [currentMask, setCurrentMask] = useState(null)  // base64
   const [brushStrokes, setBrushStrokes] = useState([])
+  
+  // 分割历史记录状态
+  const [history, setHistory] = useState([])
+  const [selectedHistoryId, setSelectedHistoryId] = useState(null)
 
   const canvasRef = useRef(null)
   const overlayRef = useRef(null)
@@ -104,6 +108,89 @@ export default function App() {
     }
     setLoading(false)
   }, [])
+
+  // ── Fetch history ──
+  const fetchHistory = useCallback(async () => {
+    if (!image) return
+    try {
+      const res = await fetch(`${API}/api/history/${image.id}`)
+      const data = await res.json()
+      if (data.success) {
+        setHistory(data.history)
+      }
+    } catch (e) {
+      console.error('获取历史记录失败:', e)
+    }
+  }, [image])
+
+  // ── Load history entry ──
+  const loadHistoryEntry = useCallback(async (entryId) => {
+    if (!image) return
+    try {
+      const res = await fetch(`${API}/api/history/get`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_id: image.id, entry_id: entryId })
+      })
+      const data = await res.json()
+      if (data.success && data.entry) {
+        const entry = data.entry
+        setCurrentMask(entry.mask)
+        setResult({
+          success: true,
+          mask: entry.mask,
+          overlay: entry.overlay,
+          score: entry.score,
+          area: entry.area,
+          bbox: entry.bbox
+        })
+        setSelectedHistoryId(entryId)
+      }
+    } catch (e) {
+      console.error('加载历史记录失败:', e)
+    }
+  }, [image])
+
+  // ── Delete history entry ──
+  const deleteHistoryEntry = useCallback(async (entryId) => {
+    if (!image) return
+    try {
+      const res = await fetch(`${API}/api/history/${image.id}/${entryId}`, {
+        method: 'DELETE'
+      })
+      const data = await res.json()
+      if (data.success) {
+        fetchHistory()
+        if (selectedHistoryId === entryId) {
+          setSelectedHistoryId(null)
+        }
+      }
+    } catch (e) {
+      console.error('删除历史记录失败:', e)
+    }
+  }, [image, selectedHistoryId, fetchHistory])
+
+  // ── Clear all history ──
+  const clearHistory = useCallback(async () => {
+    if (!image) return
+    try {
+      await fetch(`${API}/api/history/${image.id}`, { method: 'DELETE' })
+      setHistory([])
+      setSelectedHistoryId(null)
+    } catch (e) {
+      console.error('清空历史记录失败:', e)
+    }
+  }, [image])
+
+  // ── Fetch history when image changes ──
+  useEffect(() => {
+    if (image) {
+      fetchHistory()
+    } else {
+      setHistory([])
+      setSelectedHistoryId(null)
+    }
+  }, [image, fetchHistory])
 
   // ── Brush editing ──
   const handleBrushEdit = useCallback(async (x, y) => {
@@ -290,11 +377,16 @@ export default function App() {
           overlayRef.current.getContext('2d').clearRect(0, 0, overlayRef.current.width, overlayRef.current.height)
         }
       }
+      
+      // 刷新历史记录
+      if (data.success) {
+        fetchHistory()
+      }
     } catch (e) {
       setResult({ success: false, message: e.message })
     }
     setLoading(false)
-  }, [image, tool, points, box])
+  }, [image, tool, points, box, fetchHistory])
 
   // ── Clear ──
   const clearAll = () => {
@@ -1242,6 +1334,109 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* History Panel */}
+          <div className="tool-section">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <h3 style={{ margin: 0 }}>📋 分割历史 ({history.length})</h3>
+              {history.length > 0 && (
+                <button 
+                  className="btn btn-secondary btn-sm"
+                  onClick={clearHistory}
+                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
+                >
+                  🗑️ 清空
+                </button>
+              )}
+            </div>
+            
+            {history.length === 0 ? (
+              <div className="empty-state" style={{ padding: '1rem' }}>
+                <p style={{ fontSize: '0.8rem' }}>暂无历史记录</p>
+              </div>
+            ) : (
+              <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                {[...history].reverse().map((entry) => (
+                  <div
+                    key={entry.id}
+                    onClick={() => loadHistoryEntry(entry.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.5rem',
+                      marginBottom: '0.25rem',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      background: selectedHistoryId === entry.id ? 'rgba(99,102,241,0.15)' : 'var(--bg-card)',
+                      border: selectedHistoryId === entry.id ? '1px solid var(--primary)' : '1px solid var(--border)',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (selectedHistoryId !== entry.id) {
+                        e.currentTarget.style.background = 'var(--bg-hover)'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (selectedHistoryId !== entry.id) {
+                        e.currentTarget.style.background = 'var(--bg-card)'
+                      }
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '0.5rem',
+                        fontSize: '0.85rem',
+                        fontWeight: selectedHistoryId === entry.id ? 600 : 400
+                      }}>
+                        <span>{entry.tool === 'point' ? '📍' : '⬜'}</span>
+                        <span style={{ 
+                          color: selectedHistoryId === entry.id ? 'var(--primary)' : 'var(--text)' 
+                        }}>
+                          {entry.label || '分割区域'}
+                        </span>
+                      </div>
+                      <div style={{ 
+                        fontSize: '0.7rem', 
+                        color: 'var(--text-muted)',
+                        marginTop: '0.2rem',
+                        display: 'flex',
+                        gap: '0.75rem'
+                      }}>
+                        <span>置信度: {(entry.score * 100).toFixed(1)}%</span>
+                        <span>面积: {entry.area?.toLocaleString()} px</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        deleteHistoryEntry(entry.id)
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'var(--text-muted)',
+                        padding: '0.25rem',
+                        borderRadius: '4px',
+                        fontSize: '0.8rem'
+                      }}
+                      onMouseEnter={(e) => e.target.style.color = 'var(--error)'}
+                      onMouseLeave={(e) => e.target.style.color = 'var(--text-muted)'}
+                    >
+                      ❌
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.5rem', textAlign: 'center' }}>
+              💡 点击历史记录恢复分割结果
+            </div>
+          </div>
         </aside>
       </div>
 
