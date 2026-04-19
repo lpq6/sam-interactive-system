@@ -463,10 +463,26 @@ export default function App() {
   }, [])
 
   // ── 停止摄像头流 ──
-  const stopCameraStream = useCallback(() => {
+  const stopCameraStream = useCallback(async () => {
+    try {
+      // 调用后端停止摄像头
+      await fetch(`${API}/api/camera/stop`, { method: 'POST' })
+    } catch (e) {
+      console.error('停止摄像头失败:', e)
+    }
     setVideoMode('image')
     setCameraStreamUrl(null)
   }, [])
+
+  // ── 清理摄像头资源 ──
+  useEffect(() => {
+    return () => {
+      // 组件卸载时停止摄像头
+      if (cameraStreamUrl) {
+        fetch(`${API}/api/camera/stop`, { method: 'POST' }).catch(console.error)
+      }
+    }
+  }, [cameraStreamUrl])
 
   // ── 获取摄像头列表 ──
   useEffect(() => {

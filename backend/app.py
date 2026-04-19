@@ -2582,6 +2582,31 @@ async def camera_stream(camera_id: int):
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
+@app.post("/api/camera/stop")
+async def stop_camera():
+    """
+    停止所有摄像头流
+    
+    返回:
+        停止结果
+    """
+    try:
+        import cv2
+    except ImportError:
+        return {"success": False, "error": "OpenCV not installed"}
+    
+    # 停止所有 WebSocket 流
+    for camera_id in list(camera_manager.active_streams.keys()):
+        camera_manager.stop_stream(camera_id)
+    
+    # 释放所有可能打开的摄像头
+    for i in range(10):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            cap.release()
+    
+    return {"success": True, "message": "已停止所有摄像头流"}
+
 # ── 自定义类别训练 ──
 
 import torch.nn as nn
