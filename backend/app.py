@@ -2529,16 +2529,23 @@ async def list_cameras():
         return {"cameras": [], "error": "OpenCV not installed"}
     
     cameras = []
-    for i in range(10):  # 检查前 10 个摄像头
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            cameras.append({
-                "id": i,
-                "name": f"Camera {i}",
-                "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            })
+    for i in range(3):  # 只检查前 3 个摄像头，减少错误
+        try:
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                # 尝试读取一帧来验证摄像头是否真正可用
+                ret, _ = cap.read()
+                if ret:
+                    cameras.append({
+                        "id": i,
+                        "name": f"Camera {i}",
+                        "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                        "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                })
             cap.release()
+        except Exception:
+            # 忽略摄像头错误（如 WSL 环境）
+            continue
     
     return {"cameras": cameras}
 
@@ -2559,23 +2566,35 @@ async def camera_stream(camera_id: int):
         raise HTTPException(500, "OpenCV not installed")
     
     def generate():
-        cap = cv2.VideoCapture(camera_id)
-        if not cap.isOpened():
-            return
-        
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+        cap = None
+        try:
+            cap = cv2.VideoCapture(camera_id)
+            if not cap.isOpened():
+                # 发送错误帧
+                error_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(error_frame, f"Camera {camera_id} not available", (50, 240),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                _, buffer = cv2.imencode('.jpg', error_frame)
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                return
             
-            # 转换为 JPEG
-            _, buffer = cv2.imencode('.jpg', frame)
-            frame_bytes = buffer.tobytes()
-            
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        
-        cap.release()
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                # 转换为 JPEG
+                _, buffer = cv2.imencode('.jpg', frame)
+                frame_bytes = buffer.tobytes()
+                
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        except Exception as e:
+            print(f"[ERROR] Camera stream error: {e}")
+        finally:
+            if cap is not None:
+                cap.release()
     
     return StreamingResponse(
         generate(),
