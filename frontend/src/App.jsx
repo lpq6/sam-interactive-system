@@ -1527,6 +1527,22 @@ export default function App() {
                 }}>
                   🎭 下载掩码
                 </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => {
+                  const a = document.createElement('a')
+                  a.href = `${API}/api/export/coco/${image.id}`
+                  a.download = `sam_coco_${image.id}.json`
+                  a.click()
+                }}>
+                  📦 导出 COCO 格式
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => {
+                  const a = document.createElement('a')
+                  a.href = `${API}/api/export/yolo/${image.id}`
+                  a.download = `sam_yolo_${image.id}.zip`
+                  a.click()
+                }}>
+                  📦 导出 YOLO 格式
+                </button>
               </div>
             </div>
           )}

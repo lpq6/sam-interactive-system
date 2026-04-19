@@ -1888,6 +1888,203 @@ async def export_csv(image_id: str, entry_id: str = None):
         background=lambda: os.unlink(temp_file.name)
     )
 
+# ── COCO/YOLO 标注导出 ──
+
+@app.get("/api/export/coco/{image_id}")
+async def export_coco(image_id: str):
+    """
+    导出 COCO 格式标注
+    
+    参数:
+        image_id: 图片 ID
+    
+    返回:
+        COCO 格式 JSON 文件
+    """
+    import tempfile
+    import os
+    
+    if image_id not in segmentation_histories:
+        raise HTTPException(404, "没有找到该图片的分割记录")
+    
+    history = segmentation_histories[image_id]
+    entries = history.history
+    
+    # 获取图片信息
+    image_path = find_image(image_id)
+    if not image_path:
+        raise HTTPException(404, "图片不存在")
+    
+    img = Image.open(image_path)
+    width, height = img.size
+    
+    # 构建 COCO 格式
+    coco_data = {
+        "images": [{
+            "id": 1,
+            "file_name": image_path.name,
+            "width": width,
+            "height": height
+        }],
+        "annotations": [],
+        "categories": []
+    }
+    
+    # 类别映射
+    category_map = {}
+    category_id = 1
+    
+    for idx, entry in enumerate(entries):
+        label = entry.get("label", "object")
+        
+        # 添加类别
+        if label not in category_map:
+            category_map[label] = category_id
+            coco_data["categories"].append({
+                "id": category_id,
+                "name": label,
+                "supercategory": "object"
+            })
+            category_id += 1
+        
+        # 获取边界框
+        bbox = entry.get("box", [0, 0, 0, 0])
+        if not bbox or len(bbox) < 4:
+            # 从掩码计算边界框
+            mask_b64 = entry.get("mask")
+            if mask_b64:
+                mask_bytes = base64.b64decode(mask_b64)
+                mask_img = Image.open(io.BytesIO(mask_bytes)).convert('L')
+                mask_array = np.array(mask_img)
+                ys, xs = np.where(mask_array > 128)
+                if len(xs) > 0 and len(ys) > 0:
+                    bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
+                else:
+                    bbox = [0, 0, 0, 0]
+            else:
+                bbox = [0, 0, 0, 0]
+        
+        # COCO 格式: [x, y, width, height]
+        x1, y1, x2, y2 = bbox
+        coco_bbox = [x1, y1, x2 - x1, y2 - y1]
+        
+        annotation = {
+            "id": idx + 1,
+            "image_id": 1,
+            "category_id": category_map.get(label, 1),
+            "bbox": coco_bbox,
+            "area": entry.get("area", 0),
+            "iscrowd": 0,
+            "score": entry.get("score", 0)
+        }
+        
+        coco_data["annotations"].append(annotation)
+    
+    # 创建临时文件
+    temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8')
+    json.dump(coco_data, temp_file, ensure_ascii=False, indent=2)
+    temp_file.close()
+    
+    return FileResponse(
+        temp_file.name,
+        media_type="application/json",
+        filename=f"sam_coco_{image_id}.json",
+        background=lambda: os.unlink(temp_file.name)
+    )
+
+@app.get("/api/export/yolo/{image_id}")
+async def export_yolo(image_id: str):
+    """
+    导出 YOLO 格式标注
+    
+    参数:
+        image_id: 图片 ID
+    
+    返回:
+        YOLO 格式 TXT 文件（ZIP 包）
+    """
+    import tempfile
+    import os
+    import zipfile
+    
+    if image_id not in segmentation_histories:
+        raise HTTPException(404, "没有找到该图片的分割记录")
+    
+    history = segmentation_histories[image_id]
+    entries = history.history
+    
+    # 获取图片信息
+    image_path = find_image(image_id)
+    if not image_path:
+        raise HTTPException(404, "图片不存在")
+    
+    img = Image.open(image_path)
+    width, height = img.size
+    
+    # 类别映射
+    category_map = {}
+    category_id = 0
+    
+    # 生成 YOLO 格式标注
+    yolo_lines = []
+    
+    for entry in entries:
+        label = entry.get("label", "object")
+        
+        # 添加类别
+        if label not in category_map:
+            category_map[label] = category_id
+            category_id += 1
+        
+        # 获取边界框
+        bbox = entry.get("box", [0, 0, 0, 0])
+        if not bbox or len(bbox) < 4:
+            # 从掩码计算边界框
+            mask_b64 = entry.get("mask")
+            if mask_b64:
+                mask_bytes = base64.b64decode(mask_b64)
+                mask_img = Image.open(io.BytesIO(mask_bytes)).convert('L')
+                mask_array = np.array(mask_img)
+                ys, xs = np.where(mask_array > 128)
+                if len(xs) > 0 and len(ys) > 0:
+                    bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
+                else:
+                    continue
+            else:
+                continue
+        
+        # YOLO 格式: class_id center_x center_y width height (归一化)
+        x1, y1, x2, y2 = bbox
+        center_x = (x1 + x2) / 2 / width
+        center_y = (y1 + y2) / 2 / height
+        bbox_width = (x2 - x1) / width
+        bbox_height = (y2 - y1) / height
+        
+        yolo_lines.append(f"{category_map[label]} {center_x:.6f} {center_y:.6f} {bbox_width:.6f} {bbox_height:.6f}")
+    
+    # 创建临时 ZIP 文件
+    temp_zip = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
+    temp_zip.close()
+    
+    with zipfile.ZipFile(temp_zip.name, 'w') as zf:
+        # 写入标注文件
+        label_content = '\n'.join(yolo_lines)
+        zf.writestr(f"{image_id}.txt", label_content)
+        
+        # 写入类别文件
+        classes_content = '\n'.join([f"{name}" for name, _ in sorted(category_map.items(), key=lambda x: x[1])])
+        zf.writestr("classes.txt", classes_content)
+        
+        # 写入图片
+        zf.write(image_path, image_path.name)
+    
+    return FileResponse(
+        temp_zip.name,
+        media_type="application/zip",
+        filename=f"sam_yolo_{image_id}.zip",
+        background=lambda: os.unlink(temp_zip.name)
+    )
+
 # ── 视频/摄像头流分割 ──
 
 # 视频处理工具类
