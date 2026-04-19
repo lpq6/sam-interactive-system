@@ -8,7 +8,7 @@ from typing import Optional, List
 from contextlib import asynccontextmanager
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 import torch
 from torchvision import transforms
 from torchvision.models import resnet50, ResNet50_Weights
@@ -198,6 +198,67 @@ def mask_to_base64(mask: np.ndarray) -> str:
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
 
+
+def smooth_mask(mask: np.ndarray, blur_radius: int = 3, feather: bool = True) -> np.ndarray:
+    """
+    平滑掩码边缘
+    
+    参数:
+        mask: 二值掩码 (bool 或 0-255)
+        blur_radius: 高斯模糊半径
+        feather: 是否使用羽化效果
+    
+    返回:
+        平滑后的掩码 (0-255 uint8)
+    """
+    # 转换为 PIL Image
+    if mask.dtype == bool:
+        mask_uint8 = (mask * 255).astype(np.uint8)
+    else:
+        mask_uint8 = mask.astype(np.uint8)
+    
+    mask_img = Image.fromarray(mask_uint8, 'L')
+    
+    if feather:
+        # 羽化效果：先膨胀再模糊
+        from PIL import ImageFilter
+        # 轻微膨胀
+        dilated = mask_img.filter(ImageFilter.MaxFilter(size=blur_radius * 2 + 1))
+        # 高斯模糊
+        smoothed = dilated.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    else:
+        # 仅高斯模糊
+        smoothed = mask_img.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    
+    return np.array(smoothed)
+
+
+def create_rgba_from_mask(img: np.ndarray, mask: np.ndarray, smooth: bool = True) -> np.ndarray:
+    """
+    从掩码创建 RGBA 图像（透明背景）
+    
+    参数:
+        img: RGB 图像
+        mask: 分割掩码
+        smooth: 是否平滑边缘
+    
+    返回:
+        RGBA 图像 (透明背景)
+    """
+    h, w = img.shape[:2]
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    rgba[:, :, :3] = img
+    
+    if smooth:
+        # 平滑掩码边缘
+        alpha = smooth_mask(mask, blur_radius=3, feather=True)
+        rgba[:, :, 3] = alpha
+    else:
+        # 原始二值掩码
+        rgba[:, :, 3] = np.where(mask, 255, 0)
+    
+    return rgba
+
 def create_overlay(image: np.ndarray, mask: np.ndarray,
                    color=(0, 200, 255), alpha=0.45) -> str:
     """创建原图+掩码叠加效果"""
@@ -303,10 +364,25 @@ async def segment_by_point(req: PointPrompt):
     ys, xs = np.where(mask)
     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())] if len(xs) > 0 else None
 
+    # 生成平滑掩码
+    smooth_alpha = smooth_mask(mask, blur_radius=3, feather=True)
+    smooth_mask_img = Image.fromarray(smooth_alpha, 'L')
+    buf = io.BytesIO()
+    smooth_mask_img.save(buf, format="PNG")
+    smooth_mask_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    # 生成平滑 RGBA 图像
+    rgba = create_rgba_from_mask(img, mask, smooth=True)
+    rgba_img = Image.fromarray(rgba, 'RGBA')
+    rgba_buf = io.BytesIO()
+    rgba_img.save(rgba_buf, format="PNG")
+    rgba_b64 = base64.b64encode(rgba_buf.getvalue()).decode()
+
     return {
         "success": True,
-        "mask": mask_to_base64(mask),
-        "overlay": create_overlay(img, mask),  # 新增：叠加效果图
+        "mask": smooth_mask_b64,  # 平滑掩码
+        "color_image": rgba_b64,  # 平滑彩色图像
+        "overlay": create_overlay(img, mask),
         "score": float(scores[best]),
         "bbox": bbox,
         "area": int(mask.sum())
@@ -330,10 +406,25 @@ async def segment_by_box(req: BoxPrompt):
     ys, xs = np.where(mask)
     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())] if len(xs) > 0 else None
 
+    # 生成平滑掩码
+    smooth_alpha = smooth_mask(mask, blur_radius=3, feather=True)
+    smooth_mask_img = Image.fromarray(smooth_alpha, 'L')
+    buf = io.BytesIO()
+    smooth_mask_img.save(buf, format="PNG")
+    smooth_mask_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    # 生成平滑 RGBA 图像
+    rgba = create_rgba_from_mask(img, mask, smooth=True)
+    rgba_img = Image.fromarray(rgba, 'RGBA')
+    rgba_buf = io.BytesIO()
+    rgba_img.save(rgba_buf, format="PNG")
+    rgba_b64 = base64.b64encode(rgba_buf.getvalue()).decode()
+
     return {
         "success": True,
-        "mask": mask_to_base64(mask),
-        "overlay": create_overlay(img, mask),  # 新增：叠加效果图
+        "mask": smooth_mask_b64,  # 平滑掩码
+        "color_image": rgba_b64,  # 平滑彩色图像
+        "overlay": create_overlay(img, mask),
         "score": float(scores[best]),
         "bbox": bbox,
         "area": int(mask.sum())
@@ -1004,10 +1095,8 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                     if region_prob < min_confidence or region_label in generic_labels:
                         continue
                     
-                    # 提取彩色物体（透明背景）
-                    rgba = np.zeros((h, w, 4), dtype=np.uint8)
-                    rgba[:, :, :3] = img
-                    rgba[:, :, 3] = np.where(mask, 255, 0)
+                    # 提取彩色物体（平滑边缘，透明背景）
+                    rgba = create_rgba_from_mask(img, mask, smooth=True)
                     
                     y1, y2 = ys.min(), ys.max()
                     x1, x2 = xs.min(), xs.max()
@@ -1019,9 +1108,9 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                     result_img.save(buffer, format='PNG')
                     color_b64 = base64.b64encode(buffer.getvalue()).decode()
                     
-                    # 生成掩码base64
-                    mask_uint8 = (mask * 255).astype(np.uint8)
-                    mask_img = Image.fromarray(mask_uint8, 'L')
+                    # 生成平滑掩码base64
+                    smooth_alpha = smooth_mask(mask, blur_radius=3, feather=True)
+                    mask_img = Image.fromarray(smooth_alpha, 'L')
                     mask_buffer = io.BytesIO()
                     mask_img.save(mask_buffer, format='PNG')
                     mask_b64 = base64.b64encode(mask_buffer.getvalue()).decode()
