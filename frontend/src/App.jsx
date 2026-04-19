@@ -35,6 +35,15 @@ export default function App() {
   const [selectedHistoryId, setSelectedHistoryId] = useState(null)
   const [toolbarExpanded, setToolbarExpanded] = useState(true)
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
+  
+  // 视频/摄像头状态
+  const [videoMode, setVideoMode] = useState('image')  // image | video | camera
+  const [videoData, setVideoData] = useState(null)  // {video_id, filename, info, frames}
+  const [currentFrame, setCurrentFrame] = useState(null)  // 当前选中的帧
+  const [frameIndex, setFrameIndex] = useState(0)  // 当前帧索引
+  const [cameras, setCameras] = useState([])  // 可用摄像头列表
+  const [selectedCamera, setSelectedCamera] = useState(0)  // 选中的摄像头
+  const [cameraStreamUrl, setCameraStreamUrl] = useState(null)  // 摄像头流 URL
 
   const canvasRef = useRef(null)
   const overlayRef = useRef(null)
@@ -325,6 +334,94 @@ export default function App() {
       console.error('重做失败:', e)
     }
   }, [image])
+
+  // ── 视频上传 ──
+  const handleVideoUpload = useCallback(async (file) => {
+    if (!file) return
+    const fd = new FormData()
+    fd.append('file', file)
+    setLoading(true)
+    try {
+      const res = await fetch(`${API}/api/video/upload?max_frames=50`, { method: 'POST', body: fd })
+      const data = await res.json()
+      if (data.video_id) {
+        setVideoData(data)
+        setVideoMode('video')
+        setFrameIndex(0)
+        
+        // 加载第一帧
+        if (data.frames && data.frames.length > 0) {
+          const firstFrame = data.frames[0]
+          setImage({
+            id: firstFrame.image_id,
+            width: firstFrame.width,
+            height: firstFrame.height,
+            url: `${API}/api/image/${firstFrame.image_id}`
+          })
+          setCurrentFrame(firstFrame)
+        }
+        
+        alert(`✓ 视频上传成功！\n提取了 ${data.frame_count} 帧\n时长: ${data.info.duration?.toFixed(1)}s`)
+      }
+    } catch (e) {
+      alert('视频上传失败: ' + e.message)
+    }
+    setLoading(false)
+  }, [])
+
+  // ── 切换视频帧 ──
+  const switchFrame = useCallback(async (index) => {
+    if (!videoData || !videoData.frames || index < 0 || index >= videoData.frames.length) return
+    
+    const frame = videoData.frames[index]
+    setFrameIndex(index)
+    setCurrentFrame(frame)
+    
+    // 加载帧图像
+    setImage({
+      id: frame.image_id,
+      width: frame.width,
+      height: frame.height,
+      url: `${API}/api/image/${frame.image_id}`
+    })
+    
+    // 清除当前分割结果
+    setPoints([])
+    setBox(null)
+    setResult(null)
+    setCurrentMask(null)
+  }, [videoData])
+
+  // ── 获取可用摄像头 ──
+  const fetchCameras = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/camera/list`)
+      const data = await res.json()
+      if (data.cameras) {
+        setCameras(data.cameras)
+      }
+    } catch (e) {
+      console.error('获取摄像头列表失败:', e)
+    }
+  }, [])
+
+  // ── 启动摄像头流 ──
+  const startCameraStream = useCallback((cameraId) => {
+    setSelectedCamera(cameraId)
+    setVideoMode('camera')
+    setCameraStreamUrl(`${API}/api/camera/${cameraId}/stream`)
+  }, [])
+
+  // ── 停止摄像头流 ──
+  const stopCameraStream = useCallback(() => {
+    setVideoMode('image')
+    setCameraStreamUrl(null)
+  }, [])
+
+  // ── 获取摄像头列表 ──
+  useEffect(() => {
+    fetchCameras()
+  }, [fetchCameras])
 
   // ── Draw image on canvas ──
   useEffect(() => {
@@ -852,6 +949,53 @@ export default function App() {
             </div>
           )}
 
+          {/* Video frame controls (show when video is loaded) */}
+          {videoMode === 'video' && videoData && videoData.frames && videoData.frames.length > 0 && (
+            <div className="tool-section">
+              <h3>🎬 视频帧控制</h3>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+                {videoData.filename} · {videoData.frame_count} 帧 · {videoData.info.duration?.toFixed(1)}s
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <button 
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => switchFrame(Math.max(0, frameIndex - 1))}
+                  disabled={frameIndex === 0}
+                  style={{ flex: 1 }}
+                >
+                  ⏮️ 上一帧
+                </button>
+                <button 
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => switchFrame(Math.min(videoData.frames.length - 1, frameIndex + 1))}
+                  disabled={frameIndex === videoData.frames.length - 1}
+                  style={{ flex: 1 }}
+                >
+                  下一帧 ⏭️
+                </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>帧:</span>
+                <input
+                  type="range"
+                  min="0"
+                  max={videoData.frames.length - 1}
+                  value={frameIndex}
+                  onChange={(e) => switchFrame(Number(e.target.value))}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ fontSize: '0.75rem', color: 'var(--text)' }}>
+                  {frameIndex + 1}/{videoData.frames.length}
+                </span>
+              </div>
+              {currentFrame && (
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                  时间: {currentFrame.timestamp}s · {currentFrame.width}x{currentFrame.height}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Instructions */}
           <div className="tool-section">
             <h3>📖 使用说明</h3>
@@ -1041,16 +1185,16 @@ export default function App() {
               onDrop={handleDrop}
             >
               <div className="upload-icon">🖼️</div>
-              <div className="upload-title">上传图片开始分割</div>
-              <div className="upload-subtitle">拖拽图片到此处，或点击选择文件</div>
-              <div className="upload-subtitle">支持 JPG, PNG, WebP 格式</div>
+              <div className="upload-title">上传图片或视频开始分割</div>
+              <div className="upload-subtitle">拖拽文件到此处，或点击选择</div>
+              <div className="upload-subtitle">支持 JPG, PNG, WebP, MP4, AVI 格式</div>
               
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
                 <button 
                   className="btn btn-primary"
                   onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click() }}
                 >
-                  📁 选择单张图片
+                  📁 选择图片
                 </button>
                 <button 
                   className="btn btn-secondary"
@@ -1064,8 +1208,32 @@ export default function App() {
                     input.click()
                   }}
                 >
-                  📂 批量上传
+                  📂 批量图片
                 </button>
+                <button 
+                  className="btn btn-secondary"
+                  onClick={(e) => { 
+                    e.stopPropagation()
+                    const input = document.createElement('input')
+                    input.type = 'file'
+                    input.accept = 'video/*'
+                    input.onchange = (ev) => handleVideoUpload(ev.target.files[0])
+                    input.click()
+                  }}
+                >
+                  🎬 视频文件
+                </button>
+                {cameras.length > 0 && (
+                  <button 
+                    className="btn btn-secondary"
+                    onClick={(e) => { 
+                      e.stopPropagation()
+                      startCameraStream(0)
+                    }}
+                  >
+                    📷 摄像头
+                  </button>
+                )}
               </div>
               
               <input
@@ -1075,6 +1243,31 @@ export default function App() {
                 style={{ display: 'none' }}
                 onChange={(e) => handleUpload(e.target.files[0])}
               />
+            </div>
+          ) : videoMode === 'camera' && cameraStreamUrl ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+              <div style={{ position: 'relative' }}>
+                <img 
+                  src={cameraStreamUrl} 
+                  alt="Camera Stream"
+                  style={{ 
+                    maxWidth: '100%', 
+                    maxHeight: '70vh',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border)'
+                  }}
+                />
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={stopCameraStream}
+                  style={{ position: 'absolute', top: '10px', right: '10px' }}
+                >
+                  ⏹️ 停止
+                </button>
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                摄像头 #{selectedCamera} · 实时流
+              </div>
             </div>
           ) : (
             <div className="canvas-container">

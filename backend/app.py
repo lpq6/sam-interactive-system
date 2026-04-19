@@ -13,10 +13,10 @@ from PIL import Image, ImageFilter
 import torch
 from torchvision import transforms
 from torchvision.models import resnet50, ResNet50_Weights
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 # ── 配置 ──
@@ -1886,6 +1886,503 @@ async def export_csv(image_id: str, entry_id: str = None):
         media_type="text/csv",
         filename=f"sam_export_{image_id}.csv",
         background=lambda: os.unlink(temp_file.name)
+    )
+
+# ── 视频/摄像头流分割 ──
+
+# 视频处理工具类
+class VideoProcessor:
+    def __init__(self):
+        self.videos = {}  # video_id -> video info
+    
+    def extract_frames(self, video_path: str, max_frames: int = 100) -> List[dict]:
+        """
+        从视频中提取帧
+        
+        参数:
+            video_path: 视频文件路径
+            max_frames: 最大帧数
+        
+        返回:
+            帧信息列表 [{"frame_id": int, "timestamp": float, "image_id": str}]
+        """
+        try:
+            import cv2
+        except ImportError:
+            print("[WARN] OpenCV not installed, video processing disabled")
+            return []
+        
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return []
+        
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        # 计算采样间隔
+        if total_frames <= max_frames:
+            interval = 1
+        else:
+            interval = total_frames // max_frames
+        
+        frames = []
+        frame_count = 0
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            if frame_count % interval == 0:
+                # 转换为 RGB
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(frame_rgb)
+                
+                # 保存帧
+                frame_id = uuid.uuid4().hex[:10]
+                frame_path = UPLOAD_DIR / f"{frame_id}.jpg"
+                img.save(frame_path, "JPEG", quality=85)
+                
+                timestamp = frame_count / fps if fps > 0 else 0
+                
+                frames.append({
+                    "frame_id": frame_count,
+                    "timestamp": round(timestamp, 2),
+                    "image_id": frame_id,
+                    "width": img.width,
+                    "height": img.height
+                })
+            
+            frame_count += 1
+            
+            if len(frames) >= max_frames:
+                break
+        
+        cap.release()
+        return frames
+    
+    def get_video_info(self, video_path: str) -> dict:
+        """
+        获取视频信息
+        
+        参数:
+            video_path: 视频文件路径
+        
+        返回:
+            视频信息 {"duration": float, "fps": float, "width": int, "height": int, "total_frames": int}
+        """
+        try:
+            import cv2
+        except ImportError:
+            return {}
+        
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return {}
+        
+        info = {
+            "duration": cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS) if cap.get(cv2.CAP_PROP_FPS) > 0 else 0,
+            "fps": cap.get(cv2.CAP_PROP_FPS),
+            "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            "total_frames": int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        }
+        
+        cap.release()
+        return info
+
+video_processor = VideoProcessor()
+
+# 视频上传请求
+class VideoUploadRequest(BaseModel):
+    max_frames: int = 50
+
+# 视频帧分割请求
+class VideoFrameSegmentRequest(BaseModel):
+    video_id: str
+    frame_id: int
+    points: List[List[float]] = []
+    labels: List[int] = []
+    box: List[float] = []
+
+@app.post("/api/video/upload")
+async def upload_video(file: UploadFile = File(...), max_frames: int = 50):
+    """
+    上传视频文件
+    
+    参数:
+        file: 视频文件
+        max_frames: 最大提取帧数
+    
+    返回:
+        视频信息和帧列表
+    """
+    if not file.content_type or not file.content_type.startswith("video/"):
+        # 检查文件扩展名
+        ext = Path(file.filename).suffix.lower() if file.filename else ""
+        if ext not in ['.mp4', '.avi', '.mov', '.mkv', '.webm']:
+            raise HTTPException(400, "请上传视频文件")
+    
+    video_id = uuid.uuid4().hex[:10]
+    ext = Path(file.filename).suffix if file.filename else ".mp4"
+    dest = UPLOAD_DIR / f"{video_id}{ext}"
+    dest.write_bytes(await file.read())
+    
+    # 获取视频信息
+    video_info = video_processor.get_video_info(str(dest))
+    
+    # 提取帧
+    frames = video_processor.extract_frames(str(dest), max_frames)
+    
+    # 保存视频信息
+    video_processor.videos[video_id] = {
+        "path": str(dest),
+        "filename": file.filename,
+        "info": video_info,
+        "frames": frames
+    }
+    
+    return {
+        "video_id": video_id,
+        "filename": file.filename,
+        "info": video_info,
+        "frames": frames,
+        "frame_count": len(frames)
+    }
+
+@app.get("/api/video/{video_id}/info")
+async def get_video_info(video_id: str):
+    """
+    获取视频信息
+    
+    参数:
+        video_id: 视频 ID
+    
+    返回:
+        视频信息
+    """
+    if video_id not in video_processor.videos:
+        raise HTTPException(404, "视频不存在")
+    
+    video_data = video_processor.videos[video_id]
+    return {
+        "video_id": video_id,
+        "filename": video_data["filename"],
+        "info": video_data["info"],
+        "frame_count": len(video_data["frames"])
+    }
+
+@app.get("/api/video/{video_id}/frames")
+async def get_video_frames(video_id: str):
+    """
+    获取视频帧列表
+    
+    参数:
+        video_id: 视频 ID
+    
+    返回:
+        帧列表
+    """
+    if video_id not in video_processor.videos:
+        raise HTTPException(404, "视频不存在")
+    
+    return {
+        "video_id": video_id,
+        "frames": video_processor.videos[video_id]["frames"]
+    }
+
+@app.post("/api/video/segment/frame")
+async def segment_video_frame(req: VideoFrameSegmentRequest):
+    """
+    对视频帧进行分割
+    
+    参数:
+        video_id: 视频 ID
+        frame_id: 帧 ID
+        points: 点击坐标列表
+        labels: 标签列表 (1=前景, 0=背景)
+        box: 边界框 [x1, y1, x2, y2]
+    
+    返回:
+        分割结果
+    """
+    if req.video_id not in video_processor.videos:
+        raise HTTPException(404, "视频不存在")
+    
+    video_data = video_processor.videos[req.video_id]
+    
+    # 查找帧
+    frame_info = None
+    for frame in video_data["frames"]:
+        if frame["frame_id"] == req.frame_id:
+            frame_info = frame
+            break
+    
+    if not frame_info:
+        raise HTTPException(404, "帧不存在")
+    
+    # 加载帧图像
+    image_path = find_image(frame_info["image_id"])
+    if not image_path:
+        raise HTTPException(404, "帧图像不存在")
+    
+    img = np.array(Image.open(image_path).convert("RGB"))
+    sam.set_image(img)
+    
+    results = []
+    
+    # 点击分割
+    if req.points:
+        pts = np.array(req.points)
+        lbls = np.array(req.labels) if req.labels else np.ones(len(pts))
+        masks, scores = sam.predict_point(pts, lbls, multimask=True)
+        
+        for i, (mask, score) in enumerate(zip(masks, scores)):
+            mask_b64 = mask_to_base64(mask)
+            overlay_b64 = create_overlay(img, mask)
+            area = int(mask.sum())
+            
+            results.append({
+                "mask_id": i,
+                "mask": mask_b64,
+                "overlay": overlay_b64,
+                "score": float(score),
+                "area": area
+            })
+    
+    # 框选分割
+    elif req.box:
+        box = np.array(req.box)
+        masks, scores = sam.predict_box(box)
+        
+        for i, (mask, score) in enumerate(zip(masks, scores)):
+            mask_b64 = mask_to_base64(mask)
+            overlay_b64 = create_overlay(img, mask)
+            area = int(mask.sum())
+            
+            results.append({
+                "mask_id": i,
+                "mask": mask_b64,
+                "overlay": overlay_b64,
+                "score": float(score),
+                "area": area
+            })
+    
+    return {
+        "success": True,
+        "video_id": req.video_id,
+        "frame_id": req.frame_id,
+        "results": results
+    }
+
+@app.get("/api/video/{video_id}/stream")
+async def video_stream(video_id: str):
+    """
+    视频流（MJPEG）
+    
+    参数:
+        video_id: 视频 ID
+    
+    返回:
+        MJPEG 流
+    """
+    try:
+        import cv2
+    except ImportError:
+        raise HTTPException(500, "OpenCV not installed")
+    
+    if video_id not in video_processor.videos:
+        raise HTTPException(404, "视频不存在")
+    
+    video_path = video_processor.videos[video_id]["path"]
+    
+    def generate():
+        cap = cv2.VideoCapture(video_path)
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            # 转换为 JPEG
+            _, buffer = cv2.imencode('.jpg', frame)
+            frame_bytes = buffer.tobytes()
+            
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        
+        cap.release()
+    
+    return StreamingResponse(
+        generate(),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+# 摄像头流管理
+class CameraStream:
+    def __init__(self):
+        self.active_streams = {}
+    
+    async def process_camera(self, camera_id: str, websocket: WebSocket):
+        """
+        处理摄像头 WebSocket 流
+        
+        参数:
+            camera_id: 摄像头 ID
+            websocket: WebSocket 连接
+        """
+        try:
+            import cv2
+        except ImportError:
+            await websocket.send_json({"error": "OpenCV not installed"})
+            return
+        
+        cap = cv2.VideoCapture(0)  # 默认摄像头
+        if not cap.isOpened():
+            await websocket.send_json({"error": "无法打开摄像头"})
+            return
+        
+        self.active_streams[camera_id] = {
+            "cap": cap,
+            "websocket": websocket,
+            "active": True
+        }
+        
+        try:
+            while self.active_streams[camera_id]["active"]:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                # 转换为 JPEG
+                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                frame_bytes = buffer.tobytes()
+                
+                # 发送帧
+                await websocket.send_bytes(frame_bytes)
+                
+                # 检查是否有控制命令
+                try:
+                    data = await websocket.receive_text()
+                    command = json.loads(data)
+                    
+                    if command.get("action") == "stop":
+                        break
+                    elif command.get("action") == "segment":
+                        # 处理分割请求
+                        points = command.get("points", [])
+                        labels = command.get("labels", [])
+                        
+                        if points:
+                            # 转换为 RGB
+                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            img = np.array(frame_rgb)
+                            sam.set_image(img)
+                            
+                            pts = np.array(points)
+                            lbls = np.array(labels) if labels else np.ones(len(pts))
+                            masks, scores = sam.predict_point(pts, lbls, multimask=True)
+                            
+                            # 发送分割结果
+                            result = {
+                                "type": "segmentation",
+                                "masks": [mask_to_base64(masks[0])],
+                                "scores": [float(scores[0])]
+                            }
+                            await websocket.send_json(result)
+                
+                except:
+                    pass
+        
+        except WebSocketDisconnect:
+            pass
+        finally:
+            cap.release()
+            if camera_id in self.active_streams:
+                del self.active_streams[camera_id]
+    
+    def stop_stream(self, camera_id: str):
+        """停止流"""
+        if camera_id in self.active_streams:
+            self.active_streams[camera_id]["active"] = False
+
+camera_manager = CameraStream()
+
+@app.websocket("/ws/camera/{camera_id}")
+async def camera_websocket(websocket: WebSocket, camera_id: str):
+    """
+    摄像头 WebSocket 端点
+    
+    参数:
+        camera_id: 摄像头 ID
+    """
+    await websocket.accept()
+    await camera_manager.process_camera(camera_id, websocket)
+
+@app.get("/api/camera/list")
+async def list_cameras():
+    """
+    列出可用摄像头
+    
+    返回:
+        摄像头列表
+    """
+    try:
+        import cv2
+    except ImportError:
+        return {"cameras": [], "error": "OpenCV not installed"}
+    
+    cameras = []
+    for i in range(10):  # 检查前 10 个摄像头
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            cameras.append({
+                "id": i,
+                "name": f"Camera {i}",
+                "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            })
+            cap.release()
+    
+    return {"cameras": cameras}
+
+@app.get("/api/camera/{camera_id}/stream")
+async def camera_stream(camera_id: int):
+    """
+    摄像头流（MJPEG）
+    
+    参数:
+        camera_id: 摄像头 ID
+    
+    返回:
+        MJPEG 流
+    """
+    try:
+        import cv2
+    except ImportError:
+        raise HTTPException(500, "OpenCV not installed")
+    
+    def generate():
+        cap = cv2.VideoCapture(camera_id)
+        if not cap.isOpened():
+            return
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            # 转换为 JPEG
+            _, buffer = cv2.imencode('.jpg', frame)
+            frame_bytes = buffer.tobytes()
+            
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        
+        cap.release()
+    
+    return StreamingResponse(
+        generate(),
+        media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
 # ── 启动 ──
