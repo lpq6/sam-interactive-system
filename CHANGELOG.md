@@ -1,5 +1,23 @@
 # 更新日志 / CHANGELOG
 
+## [v1.10.2] - 2026-04-19
+
+### 🐛 修复界面滚动问题
+
+#### 修复内容
+- ✅ 设置 app 容器为 height: 100vh, overflow: hidden
+- ✅ 设置 body 和 #root 为 height: 100vh, overflow: hidden
+- ✅ 设置 main-content 为 min-height: 0
+- ✅ 设置 toolbar 和 results-panel 为 max-height: 100%
+- ✅ 设置 canvas-area 为 min-height: 0
+- ✅ 设置 upload-zone 为 max-height: 80%
+- ✅ 增加画布尺寸计算的内边距 (32px → 48px)
+- ✅ 减小画布最大尺寸 (800x600 → 700x550)
+
+#### 目标
+- 初始界面刚好显示全，禁止上下滚动
+- 所有内容都在视口内显示
+
 ## [v1.10.1] - 2026-04-19
 
 ### 🎨 前端界面布局优化
