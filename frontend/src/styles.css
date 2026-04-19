@@ -611,14 +611,318 @@ body {
   .results-panel { width: 240px; }
 }
 
+/* ── Mobile Adaptation ── */
 @media (max-width: 768px) {
+  /* Header */
+  .header {
+    padding: 0.5rem 1rem;
+  }
+  
+  .logo-text {
+    font-size: 0.9rem;
+  }
+  
+  .logo-icon {
+    width: 32px;
+    height: 32px;
+    font-size: 1rem;
+  }
+  
+  /* Main Layout */
   .main-content {
     flex-direction: column;
+    height: auto;
+    overflow: visible;
   }
-  .toolbar, .results-panel {
+  
+  /* Toolbar - Collapsible on mobile */
+  .toolbar {
     width: 100%;
-    border: none;
+    border-right: none;
     border-bottom: 1px solid var(--border);
+    padding: 0.75rem;
+    gap: 0.75rem;
+    max-height: 40vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .tool-section {
+    padding: 0.75rem;
+  }
+  
+  .tool-section h3 {
+    font-size: 0.7rem;
+    margin-bottom: 0.5rem;
+  }
+  
+  .tool-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.4rem;
+  }
+  
+  .tool-btn {
+    padding: 0.6rem 0.4rem;
+    font-size: 0.75rem;
+  }
+  
+  .tool-icon {
+    font-size: 1.1rem;
+  }
+  
+  /* Canvas Area */
+  .canvas-area {
+    min-height: 50vh;
+    padding: 0.5rem;
+  }
+  
+  .canvas-container {
+    max-width: 100%;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .canvas-container canvas {
+    max-width: 100%;
+    height: auto;
+    touch-action: none;
+  }
+  
+  /* Upload Zone */
+  .upload-zone {
+    padding: 2rem 1.5rem;
+    max-width: 90%;
+    border-radius: 16px;
+  }
+  
+  .upload-icon {
+    font-size: 2.5rem;
+  }
+  
+  .upload-title {
+    font-size: 1rem;
+  }
+  
+  .upload-subtitle {
+    font-size: 0.8rem;
+  }
+  
+  /* Results Panel */
+  .results-panel {
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    padding: 0.75rem;
+    gap: 0.75rem;
+    max-height: 50vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .result-metrics {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem;
+  }
+  
+  .metric-item {
+    padding: 0.4rem;
+  }
+  
+  .metric-label {
+    font-size: 0.65rem;
+  }
+  
+  .metric-value {
+    font-size: 0.8rem;
+  }
+  
+  /* Buttons */
+  .btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+  }
+  
+  .btn-sm {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.75rem;
+  }
+  
+  /* Points List */
+  .point-marker {
+    width: 14px;
+    height: 14px;
+  }
+  
+  /* Info Bar */
+  .info-bar {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.7rem;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  
+  .info-item {
+    font-size: 0.7rem;
+  }
+  
+  /* Keyboard Shortcuts - Hide on mobile */
+  .tool-section:last-child {
+    display: none;
+  }
+  
+  /* Actions */
+  .actions-row {
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  
+  .actions-row .btn {
+    width: 100%;
+  }
+  
+  /* History Panel */
+  .history-item {
+    padding: 0.4rem;
+  }
+  
+  /* Color Objects Grid */
+  .color-objects-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ── Small Mobile ── */
+@media (max-width: 480px) {
+  .header {
+    padding: 0.4rem 0.75rem;
+  }
+  
+  .logo-text {
+    font-size: 0.85rem;
+  }
+  
+  .header-actions {
+    gap: 0.5rem;
+  }
+  
+  .status-badge {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.7rem;
+  }
+  
+  .toolbar {
+    padding: 0.5rem;
+    max-height: 35vh;
+  }
+  
+  .tool-section {
+    padding: 0.5rem;
+  }
+  
+  .tool-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.3rem;
+  }
+  
+  .tool-btn {
+    padding: 0.5rem 0.3rem;
+    font-size: 0.7rem;
+    border-radius: 8px;
+  }
+  
+  .tool-icon {
+    font-size: 1rem;
+  }
+  
+  .canvas-area {
+    min-height: 45vh;
+  }
+  
+  .upload-zone {
+    padding: 1.5rem 1rem;
+  }
+  
+  .upload-icon {
+    font-size: 2rem;
+  }
+  
+  .results-panel {
+    padding: 0.5rem;
+    max-height: 45vh;
+  }
+  
+  .result-metrics {
+    grid-template-columns: 1fr;
+  }
+  
+  .btn {
+    padding: 0.45rem 0.8rem;
+    font-size: 0.75rem;
+    border-radius: 8px;
+  }
+  
+  .info-bar {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.65rem;
+    gap: 0.5rem;
+  }
+  
+  /* Model selector compact */
+  .model-selector {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+  
+  .model-selector .btn {
+    flex: none;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.7rem;
+  }
+}
+
+/* ── Touch-friendly enhancements ── */
+@media (hover: none) and (pointer: coarse) {
+  /* Larger touch targets */
+  .tool-btn {
+    min-height: 48px;
+  }
+  
+  .btn {
+    min-height: 44px;
+  }
+  
+  .btn-sm {
+    min-height: 36px;
+  }
+  
+  /* Larger point markers */
+  .point-marker {
+    width: 18px;
+    height: 18px;
+  }
+  
+  /* Disable hover effects on touch devices */
+  .tool-btn:hover,
+  .btn:hover,
+  .result-card:hover {
+    transform: none;
+  }
+  
+  /* Better scrolling */
+  .toolbar,
+  .results-panel {
+    scroll-behavior: smooth;
+    overscroll-behavior: contain;
+  }
+  
+  /* Prevent text selection on touch */
+  .tool-btn,
+  .btn,
+  .header-actions {
+    -webkit-user-select: none;
+    user-select: none;
   }
 }
 

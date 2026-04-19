@@ -33,6 +33,8 @@ export default function App() {
   // 分割历史记录状态
   const [history, setHistory] = useState([])
   const [selectedHistoryId, setSelectedHistoryId] = useState(null)
+  const [toolbarExpanded, setToolbarExpanded] = useState(true)
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
 
   const canvasRef = useRef(null)
   const overlayRef = useRef(null)
@@ -47,6 +49,15 @@ export default function App() {
       setAvailableModels(data.models || [])
       setCurrentModel(data.current || 'vit_b')
     }).catch(() => {})
+  }, [])
+
+  // ── Mobile detection ──
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768)
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
   }, [])
 
   // ── 切换模型 ──
@@ -361,6 +372,51 @@ export default function App() {
       handleBrushEdit(Math.round(ox), Math.round(oy))
     }
   }, [tool, currentMask, handleBrushEdit])
+
+  // ── Touch support for canvas ──
+  const handleTouchStart = useCallback((e) => {
+    if (!imgRef.current) return
+    e.preventDefault() // Prevent scrolling while touching canvas
+    const touch = e.touches[0]
+    const rect = canvasRef.current.getBoundingClientRect()
+    const dx = touch.clientX - rect.left
+    const dy = touch.clientY - rect.top
+    const { dw, dh, sw, sh } = imgRef.current
+    const ox = dx * sw / dw
+    const oy = dy * sh / dh
+    
+    if (tool === 'point') {
+      // On touch, add point (no shift key equivalent, use long press in future)
+      setPoints(prev => [...prev, { x: ox, y: oy, label: 1, dx, dy }])
+    } else if (tool === 'brush' && currentMask) {
+      handleBrushEdit(Math.round(ox), Math.round(oy))
+    } else if (tool === 'box') {
+      setIsDrawing(true)
+      setBox({ x1: dx, y1: dy, x2: dx, y2: dy, ox1: ox, oy1: oy })
+    }
+  }, [tool, currentMask, handleBrushEdit])
+
+  const handleTouchMove = useCallback((e) => {
+    if (!imgRef.current) return
+    e.preventDefault()
+    const touch = e.touches[0]
+    const rect = canvasRef.current.getBoundingClientRect()
+    const { dw, dh, sw, sh } = imgRef.current
+    const dx = Math.max(0, Math.min(touch.clientX - rect.left, dw))
+    const dy = Math.max(0, Math.min(touch.clientY - rect.top, dh))
+    
+    if (tool === 'brush' && currentMask) {
+      const ox = dx * sw / dw
+      const oy = dy * sh / dh
+      handleBrushEdit(Math.round(ox), Math.round(oy))
+    } else if (isDrawing && tool === 'box') {
+      setBox(prev => prev ? { ...prev, x2: dx, y2: dy, ox2: dx*sw/dw, oy2: dy*sh/dh } : null)
+    }
+  }, [tool, isDrawing, currentMask, handleBrushEdit])
+
+  const handleTouchEnd = useCallback(() => {
+    setIsDrawing(false)
+  }, [])
 
   // ── Box drawing ──
   const handleMouseDown = useCallback((e) => {
@@ -683,6 +739,30 @@ export default function App() {
       <div className="main-content">
         {/* Toolbar */}
         <aside className="toolbar">
+          {/* Mobile Toggle */}
+          {isMobile && (
+            <button 
+              className="btn btn-secondary btn-sm"
+              onClick={() => setToolbarExpanded(!toolbarExpanded)}
+              style={{ 
+                width: '100%', 
+                marginBottom: '0.5rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}
+            >
+              <span>🔧 工具面板</span>
+              <span>{toolbarExpanded ? '▲' : '▼'}</span>
+            </button>
+          )}
+
+          {/* Collapsible Content */}
+          <div style={{ 
+            display: isMobile && !toolbarExpanded ? 'none' : 'flex',
+            flexDirection: 'column',
+            gap: '1rem'
+          }}>
           {/* Model Selector */}
           <div className="tool-section">
             <h3>🧠 SAM 模型</h3>
@@ -771,18 +851,28 @@ export default function App() {
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
               {tool === 'point' ? (
                 <>
-                  <p>• <b>左键点击</b>：标记前景</p>
-                  <p>• <b>Shift+点击</b>：标记背景</p>
-                  <p>• 可添加多个点提高精度</p>
+                  {isMobile ? (
+                    <>
+                      <p>• <b>点击</b>：标记前景</p>
+                      <p>• <b>长按</b>：标记背景 (待实现)</p>
+                      <p>• 可添加多个点提高精度</p>
+                    </>
+                  ) : (
+                    <>
+                      <p>• <b>左键点击</b>：标记前景</p>
+                      <p>• <b>Shift+点击</b>：标记背景</p>
+                      <p>• 可添加多个点提高精度</p>
+                    </>
+                  )}
                 </>
               ) : tool === 'box' ? (
                 <>
-                  <p>• <b>拖拽鼠标</b>：绘制选框</p>
+                  <p>• <b>拖拽</b>：绘制选框</p>
                   <p>• 释放后自动分割</p>
                 </>
               ) : (
                 <>
-                  <p>• <b>左键点击</b>：添加/擦除掩码</p>
+                  <p>• <b>点击/触摸</b>：添加/擦除掩码</p>
                   <p>• 先使用点击或框选分割</p>
                   <p>• 再切换到画笔模式微调</p>
                 </>
@@ -845,90 +935,93 @@ export default function App() {
             </div>
           </div>
 
-          {/* Keyboard Shortcuts */}
-          <div className="tool-section">
-            <h3>⌨️ 快捷键</h3>
-            <div style={{ 
-              fontSize: '0.75rem', 
-              color: 'var(--text-muted)', 
-              lineHeight: 1.8,
-              display: 'grid',
-              gridTemplateColumns: 'auto 1fr',
-              gap: '0.25rem 0.75rem'
-            }}>
-              <kbd style={{ 
-                background: 'var(--bg-hover)', 
-                padding: '0.1rem 0.4rem', 
-                borderRadius: '4px',
-                fontFamily: 'monospace',
-                fontSize: '0.7rem'
-              }}>1</kbd>
-              <span>点击分割</span>
-              
-              <kbd style={{ 
-                background: 'var(--bg-hover)', 
-                padding: '0.1rem 0.4rem', 
-                borderRadius: '4px',
-                fontFamily: 'monospace',
-                fontSize: '0.7rem'
-              }}>2</kbd>
-              <span>框选分割</span>
-              
-              <kbd style={{ 
-                background: 'var(--bg-hover)', 
-                padding: '0.1rem 0.4rem', 
-                borderRadius: '4px',
-                fontFamily: 'monospace',
-                fontSize: '0.7rem'
-              }}>D</kbd>
-              <span>自动检测</span>
-              
-              <kbd style={{ 
-                background: 'var(--bg-hover)', 
-                padding: '0.1rem 0.4rem', 
-                borderRadius: '4px',
-                fontFamily: 'monospace',
-                fontSize: '0.7rem'
-              }}>S</kbd>
-              <span>自动分割</span>
-              
-              <kbd style={{ 
-                background: 'var(--bg-hover)', 
-                padding: '0.1rem 0.4rem', 
-                borderRadius: '4px',
-                fontFamily: 'monospace',
-                fontSize: '0.7rem'
-              }}>R</kbd>
-              <span>图像识别</span>
-              
-              <kbd style={{ 
-                background: 'var(--bg-hover)', 
-                padding: '0.1rem 0.4rem', 
-                borderRadius: '4px',
-                fontFamily: 'monospace',
-                fontSize: '0.7rem'
-              }}>C</kbd>
-              <span>彩色提取</span>
-              
-              <kbd style={{ 
-                background: 'var(--bg-hover)', 
-                padding: '0.1rem 0.4rem', 
-                borderRadius: '4px',
-                fontFamily: 'monospace',
-                fontSize: '0.7rem'
-              }}>Esc</kbd>
-              <span>清除所有</span>
-              
-              <kbd style={{ 
-                background: 'var(--bg-hover)', 
-                padding: '0.1rem 0.4rem', 
-                borderRadius: '4px',
-                fontFamily: 'monospace',
-                fontSize: '0.7rem'
-              }}>Ctrl+Z</kbd>
-              <span>撤销标记</span>
+          {/* Keyboard Shortcuts - Hide on mobile */}
+          {!isMobile && (
+            <div className="tool-section">
+              <h3>⌨️ 快捷键</h3>
+              <div style={{ 
+                fontSize: '0.75rem', 
+                color: 'var(--text-muted)', 
+                lineHeight: 1.8,
+                display: 'grid',
+                gridTemplateColumns: 'auto 1fr',
+                gap: '0.25rem 0.75rem'
+              }}>
+                <kbd style={{ 
+                  background: 'var(--bg-hover)', 
+                  padding: '0.1rem 0.4rem', 
+                  borderRadius: '4px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.7rem'
+                }}>1</kbd>
+                <span>点击分割</span>
+                
+                <kbd style={{ 
+                  background: 'var(--bg-hover)', 
+                  padding: '0.1rem 0.4rem', 
+                  borderRadius: '4px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.7rem'
+                }}>2</kbd>
+                <span>框选分割</span>
+                
+                <kbd style={{ 
+                  background: 'var(--bg-hover)', 
+                  padding: '0.1rem 0.4rem', 
+                  borderRadius: '4px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.7rem'
+                }}>D</kbd>
+                <span>自动检测</span>
+                
+                <kbd style={{ 
+                  background: 'var(--bg-hover)', 
+                  padding: '0.1rem 0.4rem', 
+                  borderRadius: '4px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.7rem'
+                }}>S</kbd>
+                <span>自动分割</span>
+                
+                <kbd style={{ 
+                  background: 'var(--bg-hover)', 
+                  padding: '0.1rem 0.4rem', 
+                  borderRadius: '4px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.7rem'
+                }}>R</kbd>
+                <span>图像识别</span>
+                
+                <kbd style={{ 
+                  background: 'var(--bg-hover)', 
+                  padding: '0.1rem 0.4rem', 
+                  borderRadius: '4px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.7rem'
+                }}>C</kbd>
+                <span>彩色提取</span>
+                
+                <kbd style={{ 
+                  background: 'var(--bg-hover)', 
+                  padding: '0.1rem 0.4rem', 
+                  borderRadius: '4px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.7rem'
+                }}>Esc</kbd>
+                <span>清除所有</span>
+                
+                <kbd style={{ 
+                  background: 'var(--bg-hover)', 
+                  padding: '0.1rem 0.4rem', 
+                  borderRadius: '4px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.7rem'
+                }}>Ctrl+Z</kbd>
+                <span>撤销标记</span>
+              </div>
             </div>
-          </div>
+          )}
+          </div> {/* End collapsible content */}
         </aside>
 
         {/* Canvas Area */}
@@ -985,8 +1078,12 @@ export default function App() {
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
                 style={{
-                  cursor: tool === 'point' ? 'crosshair' : (isDrawing ? 'grabbing' : 'crosshair')
+                  cursor: tool === 'point' ? 'crosshair' : (isDrawing ? 'grabbing' : 'crosshair'),
+                  touchAction: 'none'  // Prevent default touch behaviors
                 }}
               />
               <canvas ref={overlayRef} className="mask-overlay" />
