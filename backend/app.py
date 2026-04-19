@@ -2846,6 +2846,140 @@ async def custom_classify_object(req: dict):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# ── 模型评估可视化 ──
+
+@app.get("/api/custom/evaluate")
+async def custom_evaluate():
+    """
+    评估自定义分类器性能
+    
+    返回:
+        评估指标（准确率、混淆矩阵、各类别指标）
+    """
+    if custom_classifier.model is None:
+        return {"success": False, "error": "模型未训练"}
+    
+    try:
+        # 加载训练样本进行评估
+        if not training_samples_store:
+            return {"success": False, "error": "没有训练样本数据"}
+        
+        # 准备数据
+        all_preds = []
+        all_labels = []
+        all_probs = []
+        
+        for sample in training_samples_store:
+            try:
+                img_bytes = base64.b64decode(sample["image"])
+                img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+                predictions = custom_classifier.predict(img)
+                
+                if predictions:
+                    pred_label = predictions[0]["label"]
+                    pred_prob = predictions[0]["prob"]
+                    true_label = sample["label"]
+                    
+                    all_preds.append(pred_label)
+                    all_labels.append(true_label)
+                    all_probs.append(pred_prob)
+            except Exception as e:
+                print(f"[WARN] 评估样本失败: {e}")
+                continue
+        
+        if not all_labels:
+            return {"success": False, "error": "没有有效的评估数据"}
+        
+        # 计算指标
+        classes = custom_classifier.classes
+        num_classes = len(classes)
+        
+        # 混淆矩阵
+        confusion = [[0] * num_classes for _ in range(num_classes)]
+        for true_label, pred_label in zip(all_labels, all_preds):
+            if true_label in classes and pred_label in classes:
+                true_idx = classes.index(true_label)
+                pred_idx = classes.index(pred_label)
+                confusion[true_idx][pred_idx] += 1
+        
+        # 各类别指标
+        class_metrics = {}
+        for i, cls in enumerate(classes):
+            tp = confusion[i][i]
+            fp = sum(confusion[j][i] for j in range(num_classes) if j != i)
+            fn = sum(confusion[i][j] for j in range(num_classes) if j != i)
+            
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+            
+            class_metrics[cls] = {
+                "precision": round(precision, 4),
+                "recall": round(recall, 4),
+                "f1": round(f1, 4),
+                "support": sum(1 for l in all_labels if l == cls)
+            }
+        
+        # 总体准确率
+        correct = sum(1 for p, t in zip(all_preds, all_labels) if p == t)
+        accuracy = correct / len(all_labels) if all_labels else 0
+        
+        # 平均置信度
+        avg_confidence = sum(all_probs) / len(all_probs) if all_probs else 0
+        
+        return {
+            "success": True,
+            "accuracy": round(accuracy, 4),
+            "avg_confidence": round(avg_confidence, 4),
+            "total_samples": len(all_labels),
+            "confusion_matrix": {
+                "classes": classes,
+                "matrix": confusion
+            },
+            "class_metrics": class_metrics,
+            "predictions": [
+                {"true": t, "pred": p, "correct": t == p}
+                for t, p in zip(all_labels, all_preds)
+            ]
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# 训练样本存储（用于评估）
+training_samples_store = []
+
+@app.post("/api/custom/store-samples")
+async def store_training_samples(req: dict):
+    """
+    存储训练样本（用于评估）
+    
+    参数:
+        samples: 训练样本列表
+    """
+    global training_samples_store
+    training_samples_store = req.get("samples", [])
+    return {"success": True, "stored": len(training_samples_store)}
+
+@app.get("/api/custom/training-history")
+async def get_training_history():
+    """
+    获取训练历史记录
+    
+    返回:
+        训练历史（损失曲线等）
+    """
+    if custom_classifier.model is None:
+        return {"success": False, "error": "模型未训练"}
+    
+    # 这里可以从文件加载训练历史
+    # 暂时返回基本信息
+    return {
+        "success": True,
+        "classes": custom_classifier.classes,
+        "has_model": True,
+        "model_path": str(custom_classifier.model_path)
+    }
+
 # ── 启动 ──
 # 尝试加载默认模型
 MODELS_DIR.mkdir(exist_ok=True)

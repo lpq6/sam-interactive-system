@@ -55,6 +55,7 @@ export default function App() {
   const [newClassName, setNewClassName] = useState('')  // 新类别名称输入
   const [training, setTraining] = useState(false)  // 是否正在训练
   const [customClasses, setCustomClasses] = useState([])  // 已训练的类别列表
+  const [evaluationResult, setEvaluationResult] = useState(null)  // 模型评估结果
   
   // 原图备份（用于恢复）
   const [originalImage, setOriginalImage] = useState(null)  // 原始图片数据
@@ -2155,6 +2156,7 @@ export default function App() {
                   if (data.success) {
                     alert(`训练完成!\n类别: ${data.classes.join(', ')}\n样本数: ${data.num_samples}\n最终损失: ${data.final_loss.toFixed(4)}`)
                     setTrainingSamples([])
+                    setCustomClasses(data.classes)
                   } else {
                     alert(`训练失败: ${data.error}`)
                   }
@@ -2178,6 +2180,180 @@ export default function App() {
               >
                 🗑️ 清除样本
               </button>
+            )}
+
+            {/* 模型评估 */}
+            {customClasses.length > 0 && (
+              <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+                <h4 style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>📊 模型评估</h4>
+                
+                {/* 评估按钮 */}
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={async () => {
+                    try {
+                      // 先存储样本
+                      await fetch(`${API}/api/custom/store-samples`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ samples: trainingSamples })
+                      })
+                      
+                      // 执行评估
+                      const res = await fetch(`${API}/api/custom/evaluate`)
+                      const data = await res.json()
+                      
+                      if (data.success) {
+                        setEvaluationResult(data)
+                      } else {
+                        alert(`评估失败: ${data.error}`)
+                      }
+                    } catch (e) {
+                      alert(`评估失败: ${e.message}`)
+                    }
+                  }}
+                  style={{ width: '100%' }}
+                >
+                  📈 评估模型
+                </button>
+
+                {/* 评估结果 */}
+                {evaluationResult && (
+                  <div style={{ marginTop: '0.75rem' }}>
+                    {/* 总体指标 */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(3, 1fr)',
+                      gap: '0.5rem',
+                      marginBottom: '0.75rem'
+                    }}>
+                      <div style={{
+                        padding: '0.5rem',
+                        background: 'var(--bg-tertiary)',
+                        borderRadius: '6px',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--primary)' }}>
+                          {(evaluationResult.accuracy * 100).toFixed(1)}%
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>准确率</div>
+                      </div>
+                      <div style={{
+                        padding: '0.5rem',
+                        background: 'var(--bg-tertiary)',
+                        borderRadius: '6px',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--success)' }}>
+                          {(evaluationResult.avg_confidence * 100).toFixed(1)}%
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>平均置信度</div>
+                      </div>
+                      <div style={{
+                        padding: '0.5rem',
+                        background: 'var(--bg-tertiary)',
+                        borderRadius: '6px',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--warning)' }}>
+                          {evaluationResult.total_samples}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>样本数</div>
+                      </div>
+                    </div>
+
+                    {/* 混淆矩阵 */}
+                    {evaluationResult.confusion_matrix && (
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
+                          混淆矩阵
+                        </div>
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: `repeat(${evaluationResult.confusion_matrix.classes.length + 1}, 1fr)`,
+                          gap: '2px',
+                          fontSize: '0.7rem'
+                        }}>
+                          {/* 表头 */}
+                          <div></div>
+                          {evaluationResult.confusion_matrix.classes.map((cls, i) => (
+                            <div key={i} style={{
+                              padding: '0.25rem',
+                              background: 'var(--bg-tertiary)',
+                              borderRadius: '3px',
+                              textAlign: 'center',
+                              color: 'var(--text-secondary)'
+                            }}>
+                              {cls}
+                            </div>
+                          ))}
+                          
+                          {/* 矩阵内容 */}
+                          {evaluationResult.confusion_matrix.matrix.map((row, i) => (
+                            <React.Fragment key={i}>
+                              <div style={{
+                                padding: '0.25rem',
+                                background: 'var(--bg-tertiary)',
+                                borderRadius: '3px',
+                                color: 'var(--text-secondary)'
+                              }}>
+                                {evaluationResult.confusion_matrix.classes[i]}
+                              </div>
+                              {row.map((count, j) => (
+                                <div key={j} style={{
+                                  padding: '0.25rem',
+                                  background: i === j ? 'rgba(34, 197, 94, 0.2)' : 
+                                             count > 0 ? 'rgba(239, 68, 68, 0.2)' : 'var(--bg-tertiary)',
+                                  borderRadius: '3px',
+                                  textAlign: 'center',
+                                  color: i === j ? 'var(--success)' : 
+                                         count > 0 ? 'var(--error)' : 'var(--text-muted)'
+                                }}>
+                                  {count}
+                                </div>
+                              ))}
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 各类别指标 */}
+                    {evaluationResult.class_metrics && (
+                      <div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
+                          各类别指标
+                        </div>
+                        <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                          {Object.entries(evaluationResult.class_metrics).map(([cls, metrics]) => (
+                            <div key={cls} style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              padding: '0.4rem 0.5rem',
+                              borderBottom: '1px solid var(--border)',
+                              fontSize: '0.75rem'
+                            }}>
+                              <span style={{ color: 'var(--text)' }}>{cls}</span>
+                              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <span title="精确率" style={{ color: 'var(--primary)' }}>
+                                  P: {(metrics.precision * 100).toFixed(0)}%
+                                </span>
+                                <span title="召回率" style={{ color: 'var(--success)' }}>
+                                  R: {(metrics.recall * 100).toFixed(0)}%
+                                </span>
+                                <span title="F1分数" style={{ color: 'var(--warning)' }}>
+                                  F1: {(metrics.f1 * 100).toFixed(0)}%
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </aside>
