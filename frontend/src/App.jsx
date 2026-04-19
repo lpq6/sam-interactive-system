@@ -334,9 +334,16 @@ export default function App() {
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
-      // Fit to viewport
-      const maxW = Math.min(window.innerWidth - 600, 900)
-      const maxH = Math.min(window.innerHeight - 200, 700)
+      // Fit to viewport - 考虑工具栏和结果面板的宽度
+      const toolbarWidth = 260
+      const resultsWidth = 280
+      const headerHeight = 56
+      const footerHeight = 32
+      const padding = 32
+      
+      const maxW = Math.min(window.innerWidth - toolbarWidth - resultsWidth - padding, 800)
+      const maxH = Math.min(window.innerHeight - headerHeight - footerHeight - padding, 600)
+      
       let w = img.width, h = img.height
       if (w > maxW) { h *= maxW / w; w = maxW }
       if (h > maxH) { w *= maxH / h; h = maxH }
