@@ -17,6 +17,7 @@ export default function App() {
   const [autoSegResult, setAutoSegResult] = useState(null)
   const [colorObjects, setColorObjects] = useState(null)
   const [selectedColorObj, setSelectedColorObj] = useState(null)
+  const [theme, setTheme] = useState('dark')        // dark | light
 
   const canvasRef = useRef(null)
   const overlayRef = useRef(null)
@@ -422,7 +423,7 @@ export default function App() {
   const drawBox = box && !isDrawing ? null : null  // handled via CSS
 
   return (
-    <div className="app">
+    <div className={`app theme-${theme}`}>
       {/* Header */}
       <header className="header">
         <div className="logo">
@@ -430,6 +431,13 @@ export default function App() {
           <span className="logo-text">SAM Interactive</span>
         </div>
         <div className="header-actions">
+          <button 
+            className="btn btn-secondary btn-sm"
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            title={theme === 'dark' ? '切换亮色主题' : '切换暗色主题'}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
           {health && (
             <div className="status-badge">
               <span className="status-dot"></span>
