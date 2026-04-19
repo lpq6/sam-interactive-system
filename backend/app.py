@@ -1411,14 +1411,14 @@ async def extract_color_object(image_id: str, mask_base64: str = None, bbox: str
 
 
 @app.post("/api/extract/all")
-async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence: float = 0.3):
+async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence: float = 0.6):
     """
     批量提取高置信度彩色物体
     
     参数:
         image_id: 图片ID
         min_area: 最小区域面积（默认500）
-        min_confidence: 最低置信度阈值（默认0.3，即30%）
+        min_confidence: 最低置信度阈值（默认0.6，即60%）
     
     返回:
         置信度高于阈值的彩色物体列表

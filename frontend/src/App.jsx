@@ -44,6 +44,13 @@ export default function App() {
   const [cameras, setCameras] = useState([])  // 可用摄像头列表
   const [selectedCamera, setSelectedCamera] = useState(0)  // 选中的摄像头
   const [cameraStreamUrl, setCameraStreamUrl] = useState(null)  // 摄像头流 URL
+  
+  // 批量图片状态
+  const [batchImages, setBatchImages] = useState([])  // 批量上传的图片列表
+  const [currentBatchIndex, setCurrentBatchIndex] = useState(0)  // 当前显示的图片索引
+  
+  // 原图备份（用于恢复）
+  const [originalImage, setOriginalImage] = useState(null)  // 原始图片数据
 
   const canvasRef = useRef(null)
   const overlayRef = useRef(null)
@@ -104,15 +111,20 @@ export default function App() {
       const res = await fetch(`${API}/api/upload`, { method: 'POST', body: fd })
       const data = await res.json()
       if (data.image_id) {
-        setImage({
+        const imgData = {
           id: data.image_id,
           width: data.width,
           height: data.height,
           url: `${API}/api/image/${data.image_id}`
-        })
+        }
+        setImage(imgData)
+        setOriginalImage(imgData)  // 保存原图
+        setBatchImages([])  // 清空批量图片
+        setCurrentBatchIndex(0)
         setPoints([])
         setBox(null)
         setResult(null)
+        setColorObjects(null)
       }
     } catch (e) {
       alert('上传失败: ' + e.message)
@@ -144,25 +156,54 @@ export default function App() {
       const data = await res.json()
       
       if (data.success && data.images.length > 0) {
+        // 保存所有图片
+        setBatchImages(data.images)
+        setCurrentBatchIndex(0)
+        
         // 加载第一张图片
         const first = data.images[0]
-        setImage({
+        const imgData = {
           id: first.image_id,
           width: first.width,
           height: first.height,
           url: `${API}/api/image/${first.image_id}`
-        })
+        }
+        setImage(imgData)
+        setOriginalImage(imgData)  // 保存原图
         setPoints([])
         setBox(null)
         setResult(null)
+        setColorObjects(null)
         
-        alert(`成功上传 ${data.count} 张图片！\n当前显示第一张，可继续操作。`)
+        alert(`✓ 成功上传 ${data.count} 张图片！\n当前显示第 1 张，可使用左侧工具栏切换图片。`)
       }
     } catch (e) {
       alert('批量上传失败: ' + e.message)
     }
     setLoading(false)
   }, [])
+
+  // ── 切换批量图片 ──
+  const switchBatchImage = useCallback((index) => {
+    if (index < 0 || index >= batchImages.length) return
+    
+    const img = batchImages[index]
+    setCurrentBatchIndex(index)
+    
+    const imgData = {
+      id: img.image_id,
+      width: img.width,
+      height: img.height,
+      url: `${API}/api/image/${img.image_id}`
+    }
+    setImage(imgData)
+    setOriginalImage(imgData)
+    setPoints([])
+    setBox(null)
+    setResult(null)
+    setCurrentMask(null)
+    setColorObjects(null)
+  }, [batchImages])
 
   // ── Fetch history ──
   const fetchHistory = useCallback(async () => {
@@ -727,28 +768,67 @@ export default function App() {
     setColorObjects(null)
 
     try {
+      // 使用后端默认置信度阈值 (0.6)
       const res = await fetch(`${API}/api/extract/all?image_id=${image.id}&min_area=500`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
       const data = await res.json()
+      
       setColorObjects(data)
 
-      // 在画布上显示彩色叠加图
-      if (data.overlay && canvasRef.current && imgRef.current) {
+      // 在画布上显示彩色叠加图（显示第一个物体或叠加图）
+      if (data.objects && data.objects.length > 0 && canvasRef.current && imgRef.current) {
+        // 显示所有物体的叠加效果
         const ctx = canvasRef.current.getContext('2d')
-        const img = new Image()
-        img.onload = () => {
+        
+        // 先绘制原图
+        const originalImg = new Image()
+        originalImg.crossOrigin = 'anonymous'
+        originalImg.onload = () => {
           ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
-          ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height)
+          ctx.drawImage(originalImg, 0, 0, canvasRef.current.width, canvasRef.current.height)
+          
+          // 叠加每个物体的彩色图像
+          data.objects.forEach(obj => {
+            if (obj.color_image) {
+              const objImg = new Image()
+              objImg.onload = () => {
+                ctx.drawImage(objImg, 0, 0, canvasRef.current.width, canvasRef.current.height)
+              }
+              objImg.src = `data:image/png;base64,${obj.color_image}`
+            }
+          })
         }
-        img.src = `data:image/png;base64,${data.overlay}`
+        originalImg.src = image.url
       }
     } catch (e) {
       setColorObjects({ success: false, message: e.message })
     }
     setLoading(false)
   }, [image])
+
+  // ── 恢复原图 ──
+  const restoreOriginalImage = useCallback(() => {
+    if (!originalImage || !canvasRef.current) return
+    
+    const ctx = canvasRef.current.getContext('2d')
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+      ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height)
+    }
+    img.src = originalImage.url
+    
+    // 清除分割结果
+    setPoints([])
+    setBox(null)
+    setResult(null)
+    setCurrentMask(null)
+    setColorObjects(null)
+    setSelectedColorObj(null)
+  }, [originalImage])
 
   // ── Show single colored object on canvas ──
   const showColorObject = useCallback((obj) => {
@@ -996,6 +1076,48 @@ export default function App() {
             </div>
           )}
 
+          {/* Batch image controls (show when batch images are loaded) */}
+          {batchImages.length > 1 && (
+            <div className="tool-section">
+              <h3>📂 批量图片 ({batchImages.length}张)</h3>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <button 
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => switchBatchImage(Math.max(0, currentBatchIndex - 1))}
+                  disabled={currentBatchIndex === 0}
+                  style={{ flex: 1 }}
+                >
+                  ⏮️ 上一张
+                </button>
+                <button 
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => switchBatchImage(Math.min(batchImages.length - 1, currentBatchIndex + 1))}
+                  disabled={currentBatchIndex === batchImages.length - 1}
+                  style={{ flex: 1 }}
+                >
+                  下一张 ⏭️
+                </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>图片:</span>
+                <input
+                  type="range"
+                  min="0"
+                  max={batchImages.length - 1}
+                  value={currentBatchIndex}
+                  onChange={(e) => switchBatchImage(Number(e.target.value))}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ fontSize: '0.75rem', color: 'var(--text)' }}>
+                  {currentBatchIndex + 1}/{batchImages.length}
+                </span>
+              </div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                {batchImages[currentBatchIndex]?.filename || `图片 ${currentBatchIndex + 1}`}
+              </div>
+            </div>
+          )}
+
           {/* Instructions */}
           <div className="tool-section">
             <h3>📖 使用说明</h3>
@@ -1080,8 +1202,13 @@ export default function App() {
             <div className="actions-row" style={{ marginTop: '0.5rem' }}>
               <button className="btn btn-primary" onClick={runExtractColors}
                 disabled={loading || !image}
-                style={{ width: '100%' }}>
+                style={{ flex: 1 }}>
                 {loading ? '⏳ 提取中...' : '🎨 提取彩色物体'}
+              </button>
+              <button className="btn btn-secondary" onClick={restoreOriginalImage}
+                disabled={!originalImage}
+                style={{ flex: 1 }}>
+                🖼️ 恢复原图
               </button>
             </div>
           </div>
@@ -1611,6 +1738,18 @@ export default function App() {
             <div className="tool-section">
               <h3>🎨 彩色物体提取 ({colorObjects.count} 个)</h3>
               
+              {/* 提示信息 */}
+              <div style={{ 
+                fontSize: '0.75rem', 
+                color: 'var(--text-muted)', 
+                marginBottom: '0.5rem',
+                padding: '0.5rem',
+                background: 'rgba(99,102,241,0.1)',
+                borderRadius: '6px'
+              }}>
+                💡 点击物体查看效果 · 置信度 ≥ 60%
+              </div>
+              
               {/* 彩色物体网格 */}
               <div style={{
                 display: 'grid',
@@ -1660,13 +1799,24 @@ export default function App() {
                     <div style={{
                       fontSize: '0.6rem',
                       textAlign: 'center',
-                      color: 'var(--text-muted)'
+                      color: obj.confidence >= 0.8 ? 'var(--success)' : 
+                             obj.confidence >= 0.6 ? 'var(--warning)' : 'var(--error)',
+                      fontWeight: 600
                     }}>
-                      {obj.confidence ? `${(obj.confidence * 100).toFixed(0)}%` : `${(obj.score * 100).toFixed(0)}%`}
+                      {(obj.confidence * 100).toFixed(0)}%
                     </div>
                   </div>
                 ))}
               </div>
+
+              {/* 恢复原图按钮 */}
+              <button 
+                className="btn btn-secondary btn-sm"
+                onClick={restoreOriginalImage}
+                style={{ width: '100%', marginTop: '0.75rem' }}
+              >
+                🖼️ 恢复原图
+              </button>
 
               {/* 选中物体详情 */}
               {selectedColorObj && (
