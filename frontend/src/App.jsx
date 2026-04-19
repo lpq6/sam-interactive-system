@@ -49,6 +49,13 @@ export default function App() {
   const [batchImages, setBatchImages] = useState([])  // 批量上传的图片列表
   const [currentBatchIndex, setCurrentBatchIndex] = useState(0)  // 当前显示的图片索引
   
+  // 自定义训练状态
+  const [trainingClasses, setTrainingClasses] = useState([])  // 自定义类别列表
+  const [trainingSamples, setTrainingSamples] = useState([])  // 训练样本 [{image: base64, label: string}]
+  const [newClassName, setNewClassName] = useState('')  // 新类别名称输入
+  const [training, setTraining] = useState(false)  // 是否正在训练
+  const [customClasses, setCustomClasses] = useState([])  // 已训练的类别列表
+  
   // 原图备份（用于恢复）
   const [originalImage, setOriginalImage] = useState(null)  // 原始图片数据
 
@@ -2008,6 +2015,170 @@ export default function App() {
             <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.5rem', textAlign: 'center' }}>
               💡 点击历史记录恢复分割结果
             </div>
+          </div>
+
+          {/* Custom Training */}
+          <div className="tool-section">
+            <h3>🎯 自定义训练</h3>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+              训练自定义分类器，识别特定类别
+            </div>
+            
+            {/* 类别管理 */}
+            <div style={{ marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <input
+                  type="text"
+                  value={newClassName}
+                  onChange={(e) => setNewClassName(e.target.value)}
+                  placeholder="输入类别名称"
+                  style={{
+                    flex: 1,
+                    padding: '0.4rem 0.6rem',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text)',
+                    fontSize: '0.8rem'
+                  }}
+                />
+                <button 
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    if (newClassName.trim() && !trainingClasses.includes(newClassName.trim())) {
+                      setTrainingClasses([...trainingClasses, newClassName.trim()])
+                      setNewClassName('')
+                    }
+                  }}
+                >
+                  ➕ 添加
+                </button>
+              </div>
+              
+              {/* 类别列表 */}
+              {trainingClasses.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                  {trainingClasses.map((cls, i) => (
+                    <span key={i} style={{
+                      padding: '0.2rem 0.5rem',
+                      borderRadius: '4px',
+                      background: 'var(--bg-hover)',
+                      border: '1px solid var(--border)',
+                      fontSize: '0.75rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.3rem'
+                    }}>
+                      {cls}
+                      <span 
+                        onClick={() => setTrainingClasses(trainingClasses.filter(c => c !== cls))}
+                        style={{ cursor: 'pointer', color: 'var(--error)' }}
+                      >×</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 训练样本 */}
+            {result?.success && trainingClasses.length > 0 && (
+              <div style={{ marginBottom: '0.75rem' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
+                  添加当前分割为训练样本:
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                  {trainingClasses.map((cls, i) => (
+                    <button
+                      key={i}
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        if (result.mask) {
+                          setTrainingSamples([...trainingSamples, {
+                            image: result.mask,
+                            label: cls
+                          }])
+                        }
+                      }}
+                      style={{ fontSize: '0.7rem' }}
+                    >
+                      📌 {cls}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 样本统计 */}
+            {trainingSamples.length > 0 && (
+              <div style={{ 
+                fontSize: '0.75rem', 
+                color: 'var(--text-muted)', 
+                marginBottom: '0.5rem',
+                padding: '0.5rem',
+                background: 'var(--bg-tertiary)',
+                borderRadius: '6px'
+              }}>
+                📊 {trainingSamples.length} 个样本
+                {trainingClasses.map((cls, i) => {
+                  const count = trainingSamples.filter(s => s.label === cls).length
+                  return count > 0 ? (
+                    <span key={i} style={{ marginLeft: '0.5rem' }}>
+                      {cls}: {count}
+                    </span>
+                  ) : null
+                })}
+              </div>
+            )}
+
+            {/* 训练按钮 */}
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={async () => {
+                if (trainingSamples.length < trainingClasses.length * 2) {
+                  alert(`样本不足，每个类别至少需要2个样本`)
+                  return
+                }
+                
+                setTraining(true)
+                try {
+                  const res = await fetch(`${API}/api/custom/train`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      samples: trainingSamples,
+                      epochs: 10,
+                      lr: 0.001
+                    })
+                  })
+                  const data = await res.json()
+                  
+                  if (data.success) {
+                    alert(`训练完成!\n类别: ${data.classes.join(', ')}\n样本数: ${data.num_samples}\n最终损失: ${data.final_loss.toFixed(4)}`)
+                    setTrainingSamples([])
+                  } else {
+                    alert(`训练失败: ${data.error}`)
+                  }
+                } catch (e) {
+                  alert(`训练失败: ${e.message}`)
+                }
+                setTraining(false)
+              }}
+              disabled={training || trainingSamples.length < trainingClasses.length * 2}
+              style={{ width: '100%' }}
+            >
+              {training ? '⏳ 训练中...' : '🚀 开始训练'}
+            </button>
+
+            {/* 清除样本 */}
+            {trainingSamples.length > 0 && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setTrainingSamples([])}
+                style={{ width: '100%', marginTop: '0.5rem' }}
+              >
+                🗑️ 清除样本
+              </button>
+            )}
           </div>
         </aside>
       </div>

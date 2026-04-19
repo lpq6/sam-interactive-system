@@ -2582,6 +2582,270 @@ async def camera_stream(camera_id: int):
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
+# ── 自定义类别训练 ──
+
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import transforms
+
+class CustomClassifier:
+    """自定义类别分类器"""
+    def __init__(self):
+        self.model = None
+        self.classes = []  # 类别列表
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        self.model_path = MODELS_DIR / "custom_classifier.pth"
+        self.classes_path = MODELS_DIR / "custom_classes.json"
+        self.load()
+    
+    def load(self):
+        """加载已有模型"""
+        if self.model_path.exists() and self.classes_path.exists():
+            try:
+                self.classes = json.loads(self.classes_path.read_text(encoding='utf-8'))
+                num_classes = len(self.classes)
+                
+                # 使用预训练的 ResNet18 作为基础
+                from torchvision.models import resnet18, ResNet18_Weights
+                self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
+                self.model.fc = nn.Linear(512, num_classes)
+                
+                state_dict = torch.load(str(self.model_path), map_location='cpu')
+                self.model.load_state_dict(state_dict)
+                self.model.eval()
+                
+                if torch.cuda.is_available():
+                    self.model = self.model.cuda()
+                
+                print(f"[OK] 自定义分类器已加载: {self.classes}")
+                return True
+            except Exception as e:
+                print(f"[WARN] 加载自定义分类器失败: {e}")
+                self.model = None
+                return False
+        return False
+    
+    def save(self):
+        """保存模型和类别"""
+        if self.model is not None:
+            torch.save(self.model.state_dict(), str(self.model_path))
+            self.classes_path.write_text(json.dumps(self.classes, ensure_ascii=False), encoding='utf-8')
+            print(f"[OK] 自定义分类器已保存: {self.classes}")
+    
+    def train(self, samples: List[dict], epochs: int = 10, lr: float = 0.001):
+        """
+        训练分类器
+        
+        参数:
+            samples: [{"image": base64, "label": "类别名"}, ...]
+            epochs: 训练轮数
+            lr: 学习率
+        
+        返回:
+            训练结果
+        """
+        # 收集所有类别
+        self.classes = list(set(s["label"] for s in samples))
+        num_classes = len(self.classes)
+        
+        if num_classes < 2:
+            return {"success": False, "error": "至少需要2个不同类别"}
+        
+        # 准备数据
+        images = []
+        labels = []
+        
+        for sample in samples:
+            try:
+                img_bytes = base64.b64decode(sample["image"])
+                img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+                tensor = self.transform(img)
+                images.append(tensor)
+                labels.append(self.classes.index(sample["label"]))
+            except Exception as e:
+                print(f"[WARN] 处理样本失败: {e}")
+                continue
+        
+        if len(images) < num_classes * 2:
+            return {"success": False, "error": f"样本不足，每个类别至少需要2个样本"}
+        
+        # 创建数据加载器
+        images_tensor = torch.stack(images)
+        labels_tensor = torch.tensor(labels, dtype=torch.long)
+        
+        dataset = torch.utils.data.TensorDataset(images_tensor, labels_tensor)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=min(8, len(dataset)), shuffle=True)
+        
+        # 创建模型
+        from torchvision.models import resnet18, ResNet18_Weights
+        self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
+        self.model.fc = nn.Linear(512, num_classes)
+        
+        if torch.cuda.is_available():
+            self.model = self.model.cuda()
+            images_tensor = images_tensor.cuda()
+            labels_tensor = labels_tensor.cuda()
+        
+        # 训练
+        self.model.train()
+        optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        criterion = nn.CrossEntropyLoss()
+        
+        losses = []
+        for epoch in range(epochs):
+            epoch_loss = 0
+            for batch_images, batch_labels in loader:
+                if torch.cuda.is_available():
+                    batch_images = batch_images.cuda()
+                    batch_labels = batch_labels.cuda()
+                
+                optimizer.zero_grad()
+                outputs = self.model(batch_images)
+                loss = criterion(outputs, batch_labels)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+            
+            losses.append(epoch_loss / len(loader))
+        
+        self.model.eval()
+        self.save()
+        
+        return {
+            "success": True,
+            "classes": self.classes,
+            "num_samples": len(images),
+            "epochs": epochs,
+            "final_loss": losses[-1],
+            "losses": losses
+        }
+    
+    def predict(self, image: Image.Image) -> List[dict]:
+        """预测图片类别"""
+        if self.model is None or not self.classes:
+            return []
+        
+        try:
+            tensor = self.transform(image).unsqueeze(0)
+            if torch.cuda.is_available():
+                tensor = tensor.cuda()
+            
+            with torch.no_grad():
+                output = self.model(tensor)
+                probs = torch.softmax(output, dim=1)[0]
+            
+            results = []
+            for i, cls in enumerate(self.classes):
+                results.append({
+                    "label": cls,
+                    "prob": round(float(probs[i]), 4)
+                })
+            
+            return sorted(results, key=lambda x: -x["prob"])
+        except Exception as e:
+            print(f"[ERROR] 预测失败: {e}")
+            return []
+
+# 全局自定义分类器
+custom_classifier = CustomClassifier()
+
+class TrainRequest(BaseModel):
+    samples: List[dict]  # [{"image": base64, "label": "类别名"}, ...]
+    epochs: int = 10
+    lr: float = 0.001
+
+@app.post("/api/custom/train")
+async def custom_train(req: TrainRequest):
+    """
+    训练自定义分类器
+    
+    参数:
+        samples: 训练样本列表 [{"image": base64, "label": "类别名"}, ...]
+        epochs: 训练轮数（默认10）
+        lr: 学习率（默认0.001）
+    
+    返回:
+        训练结果
+    """
+    result = custom_classifier.train(req.samples, req.epochs, req.lr)
+    return result
+
+@app.get("/api/custom/classes")
+async def custom_classes():
+    """获取自定义类别列表"""
+    return {
+        "success": True,
+        "classes": custom_classifier.classes,
+        "has_model": custom_classifier.model is not None
+    }
+
+@app.post("/api/custom/predict")
+async def custom_predict(image_id: str = None):
+    """
+    使用自定义分类器预测
+    
+    参数:
+        image_id: 图片ID（可选，不传则用当前图片）
+    
+    返回:
+        预测结果
+    """
+    if custom_classifier.model is None:
+        return {"success": False, "error": "模型未训练"}
+    
+    path = find_image(image_id) if image_id else None
+    if not path:
+        # 使用最后一个图片
+        if image_registry:
+            image_id = list(image_registry.keys())[-1]
+            path = find_image(image_id)
+    
+    if not path:
+        return {"success": False, "error": "图片不存在"}
+    
+    img = Image.open(path).convert("RGB")
+    results = custom_classifier.predict(img)
+    
+    return {
+        "success": True,
+        "image_id": image_id,
+        "predictions": results,
+        "top_class": results[0]["label"] if results else None,
+        "top_prob": results[0]["prob"] if results else 0
+    }
+
+@app.post("/api/custom/classify-object")
+async def custom_classify_object(req: dict):
+    """
+    对单个物体进行自定义分类
+    
+    参数:
+        image_base64: 物体图片的base64
+    
+    返回:
+        分类结果
+    """
+    if custom_classifier.model is None:
+        return {"success": False, "error": "模型未训练"}
+    
+    try:
+        img_bytes = base64.b64decode(req.get("image_base64", ""))
+        img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+        results = custom_classifier.predict(img)
+        
+        return {
+            "success": True,
+            "predictions": results,
+            "top_class": results[0]["label"] if results else None,
+            "top_prob": results[0]["prob"] if results else 0
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 # ── 启动 ──
 # 尝试加载默认模型
 MODELS_DIR.mkdir(exist_ok=True)
