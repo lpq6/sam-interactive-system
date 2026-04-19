@@ -61,6 +61,43 @@ export default function App() {
     if (file?.type.startsWith('image/')) handleUpload(file)
   }, [handleUpload])
 
+  // ── Batch upload ──
+  const handleBatchUpload = useCallback(async (files) => {
+    if (!files || files.length === 0) return
+    
+    const fd = new FormData()
+    for (const file of files) {
+      if (file.type.startsWith('image/')) {
+        fd.append('files', file)
+      }
+    }
+    
+    setLoading(true)
+    try {
+      const res = await fetch(`${API}/api/upload/batch`, { method: 'POST', body: fd })
+      const data = await res.json()
+      
+      if (data.success && data.images.length > 0) {
+        // 加载第一张图片
+        const first = data.images[0]
+        setImage({
+          id: first.image_id,
+          width: first.width,
+          height: first.height,
+          url: `${API}/api/image/${first.image_id}`
+        })
+        setPoints([])
+        setBox(null)
+        setResult(null)
+        
+        alert(`成功上传 ${data.count} 张图片！\n当前显示第一张，可继续操作。`)
+      }
+    } catch (e) {
+      alert('批量上传失败: ' + e.message)
+    }
+    setLoading(false)
+  }, [])
+
   // ── Draw image on canvas ──
   useEffect(() => {
     if (!image || !canvasRef.current) return
@@ -588,7 +625,6 @@ export default function App() {
           {!image ? (
             <div
               className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
-              onClick={() => fileInputRef.current?.click()}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
               onDrop={handleDrop}
@@ -597,6 +633,30 @@ export default function App() {
               <div className="upload-title">上传图片开始分割</div>
               <div className="upload-subtitle">拖拽图片到此处，或点击选择文件</div>
               <div className="upload-subtitle">支持 JPG, PNG, WebP 格式</div>
+              
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                <button 
+                  className="btn btn-primary"
+                  onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click() }}
+                >
+                  📁 选择单张图片
+                </button>
+                <button 
+                  className="btn btn-secondary"
+                  onClick={(e) => { 
+                    e.stopPropagation()
+                    const input = document.createElement('input')
+                    input.type = 'file'
+                    input.multiple = true
+                    input.accept = 'image/*'
+                    input.onchange = (ev) => handleBatchUpload(ev.target.files)
+                    input.click()
+                  }}
+                >
+                  📂 批量上传
+                </button>
+              </div>
+              
               <input
                 ref={fileInputRef}
                 type="file"

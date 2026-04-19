@@ -338,6 +338,152 @@ async def upload_image(file: UploadFile = File(...)):
         "filename": file.filename
     }
 
+@app.post("/api/upload/batch")
+async def upload_batch(files: List[UploadFile] = File(...)):
+    """
+    批量上传图片
+    
+    返回:
+        所有上传图片的 ID 列表
+    """
+    results = []
+    for file in files:
+        if not file.content_type or not file.content_type.startswith("image/"):
+            continue
+        
+        image_id = uuid.uuid4().hex[:10]
+        ext = Path(file.filename).suffix if file.filename else ".png"
+        dest = UPLOAD_DIR / f"{image_id}{ext}"
+        dest.write_bytes(await file.read())
+        
+        img = Image.open(dest).convert("RGB")
+        results.append({
+            "image_id": image_id,
+            "width": img.width,
+            "height": img.height,
+            "filename": file.filename
+        })
+    
+    return {
+        "success": True,
+        "count": len(results),
+        "images": results
+    }
+
+@app.post("/api/batch/process")
+async def batch_process(image_ids: List[str], min_confidence: float = 0.3):
+    """
+    批量处理图片 - 自动检测 + 识别
+    
+    参数:
+        image_ids: 图片 ID 列表
+        min_confidence: 最低置信度阈值
+    
+    返回:
+        每张图片的检测结果
+    """
+    results = []
+    
+    for image_id in image_ids:
+        path = find_image(image_id)
+        if not path:
+            results.append({"image_id": image_id, "success": False, "error": "图片不存在"})
+            continue
+        
+        try:
+            img = np.array(Image.open(path).convert("RGB"))
+            h, w = img.shape[:2]
+            sam.set_image(img)
+            
+            # 网格采样点
+            step = max(w, h) // 20
+            step = max(step, 40)
+            
+            detections = []
+            used_masks = []
+            generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
+            
+            for y in range(step//2, h, step):
+                for x in range(step//2, w, step):
+                    if len(detections) >= 10:
+                        break
+                    
+                    try:
+                        masks, scores, _ = sam.predictor.predict(
+                            point_coords=np.array([[x, y]]),
+                            point_labels=np.array([1]),
+                            multimask_output=False
+                        )
+                        
+                        mask = masks[0]
+                        area = int(mask.sum())
+                        
+                        if area < 500:
+                            continue
+                        
+                        # 检查重复
+                        is_duplicate = False
+                        for used in used_masks:
+                            overlap = (mask & used).sum() / min(mask.sum(), used.sum())
+                            if overlap > 0.5:
+                                is_duplicate = True
+                                break
+                        if is_duplicate:
+                            continue
+                        
+                        used_masks.append(mask)
+                        
+                        # 计算边界框
+                        ys, xs = np.where(mask)
+                        bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
+                        
+                        # 用 ResNet 识别
+                        region_label = "未知"
+                        region_prob = 0.0
+                        if classifier.model:
+                            try:
+                                x1, y1, x2, y2 = bbox
+                                margin = 5
+                                crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
+                                if crop.size > 0:
+                                    crop_pil = Image.fromarray(crop)
+                                    result = classifier.classify(crop_pil, top_k=1)
+                                    if result:
+                                        region_label = result[0]["label"]
+                                        region_prob = result[0]["prob"]
+                            except:
+                                pass
+                        
+                        # 跳过低置信度
+                        if region_prob < min_confidence or region_label in generic_labels:
+                            continue
+                        
+                        detections.append({
+                            "label": region_label,
+                            "confidence": round(region_prob, 3),
+                            "bbox": bbox,
+                            "area": area
+                        })
+                        
+                    except Exception:
+                        continue
+            
+            results.append({
+                "image_id": image_id,
+                "success": True,
+                "detections": detections,
+                "count": len(detections)
+            })
+            
+        except Exception as e:
+            results.append({"image_id": image_id, "success": False, "error": str(e)})
+    
+    return {
+        "success": True,
+        "total": len(results),
+        "results": results
+    }
+
 @app.get("/api/image/{image_id}")
 async def get_image(image_id: str):
     path = find_image(image_id)
