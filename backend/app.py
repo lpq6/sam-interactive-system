@@ -853,6 +853,209 @@ async def detect_objects(file: UploadFile = File(...)):
     except Exception as e:
         return {"detections": [], "error": str(e)}
 
+
+@app.post("/api/extract/color")
+async def extract_color_object(image_id: str, mask_base64: str = None, bbox: str = None):
+    """
+    彩色物体提取 - 从原图中提取彩色物体（透明背景）
+    
+    参数:
+        image_id: 图片ID
+        mask_base64: 掩码的base64编码（可选）
+        bbox: 边界框 "x1,y1,x2,y2"（可选，如果没有掩码则用边界框裁剪）
+    
+    返回:
+        彩色物体的base64编码PNG（透明背景）
+    """
+    path = find_image(image_id)
+    if not path:
+        raise HTTPException(404, "图片不存在")
+    
+    img = np.array(Image.open(path).convert("RGB"))
+    h, w = img.shape[:2]
+    
+    # 创建RGBA图像（带透明通道）
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    rgba[:, :, :3] = img  # RGB通道
+    
+    if mask_base64:
+        # 使用掩码提取
+        mask_bytes = base64.b64decode(mask_base64)
+        mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")
+        mask = np.array(mask_img.resize((w, h))) > 128
+        
+        # 设置透明度：掩码区域不透明，其他区域透明
+        rgba[:, :, 3] = np.where(mask, 255, 0)
+        
+        # 裁剪到边界框区域
+        ys, xs = np.where(mask)
+        if len(ys) > 0:
+            y1, y2 = ys.min(), ys.max()
+            x1, x2 = xs.min(), xs.max()
+            cropped = rgba[y1:y2+1, x1:x2+1]
+        else:
+            cropped = rgba
+    elif bbox:
+        # 使用边界框裁剪
+        coords = list(map(int, bbox.split(',')))
+        x1, y1, x2, y2 = coords
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        cropped = rgba[y1:y2, x1:x2]
+        cropped[:, :, 3] = 255  # 全不透明
+    else:
+        raise HTTPException(400, "需要提供 mask_base64 或 bbox")
+    
+    # 转为PNG base64
+    result_img = Image.fromarray(cropped, 'RGBA')
+    buffer = io.BytesIO()
+    result_img.save(buffer, format='PNG')
+    color_base64 = base64.b64encode(buffer.getvalue()).decode()
+    
+    return {
+        "success": True,
+        "color_image": color_base64,
+        "size": [cropped.shape[1], cropped.shape[0]],
+        "format": "png"
+    }
+
+
+@app.post("/api/extract/all")
+async def extract_all_objects(image_id: str, min_area: int = 500):
+    """
+    批量提取所有彩色物体
+    
+    参数:
+        image_id: 图片ID
+        min_area: 最小区域面积（默认500）
+    
+    返回:
+        所有检测到的彩色物体列表
+    """
+    path = find_image(image_id)
+    if not path:
+        raise HTTPException(404, "图片不存在")
+    
+    img = np.array(Image.open(path).convert("RGB"))
+    h, w = img.shape[:2]
+    
+    try:
+        sam.set_image(img)
+        
+        # 网格采样点
+        step = max(w, h) // 20
+        step = max(step, 40)
+        
+        objects = []
+        used_masks = []
+        colors = [
+            [255, 0, 0], [0, 255, 0], [0, 0, 255],
+            [255, 255, 0], [255, 0, 255], [0, 255, 255]
+        ]
+        
+        for y in range(step//2, h, step):
+            for x in range(step//2, w, step):
+                if len(objects) >= 15:
+                    break
+                
+                try:
+                    masks, scores, _ = sam.predictor.predict(
+                        point_coords=np.array([[x, y]]),
+                        point_labels=np.array([1]),
+                        multimask_output=False
+                    )
+                    
+                    mask = masks[0]
+                    area = mask.sum()
+                    
+                    if area < min_area:
+                        continue
+                    
+                    # 检查重复
+                    is_dup = False
+                    for used in used_masks:
+                        if (mask & used).sum() / min(mask.sum(), used.sum()) > 0.5:
+                            is_dup = True
+                            break
+                    if is_dup:
+                        continue
+                    
+                    used_masks.append(mask)
+                    
+                    # 计算边界框
+                    ys, xs = np.where(mask)
+                    bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
+                    
+                    # 提取彩色物体（透明背景）
+                    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+                    rgba[:, :, :3] = img
+                    rgba[:, :, 3] = np.where(mask, 255, 0)
+                    
+                    y1, y2 = ys.min(), ys.max()
+                    x1, x2 = xs.min(), xs.max()
+                    cropped = rgba[y1:y2+1, x1:x2+1]
+                    
+                    # 转为base64
+                    result_img = Image.fromarray(cropped, 'RGBA')
+                    buffer = io.BytesIO()
+                    result_img.save(buffer, format='PNG')
+                    color_b64 = base64.b64encode(buffer.getvalue()).decode()
+                    
+                    # 生成掩码base64
+                    mask_uint8 = (mask * 255).astype(np.uint8)
+                    mask_img = Image.fromarray(mask_uint8, 'L')
+                    mask_buffer = io.BytesIO()
+                    mask_img.save(mask_buffer, format='PNG')
+                    mask_b64 = base64.b64encode(mask_buffer.getvalue()).decode()
+                    
+                    # 用 ResNet 识别该区域
+                    region_label = "未知"
+                    region_prob = 0.0
+                    if classifier.model:
+                        try:
+                            margin = 5
+                            crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
+                            if crop.size > 0:
+                                crop_pil = Image.fromarray(crop)
+                                result = classifier.classify(crop_pil, top_k=1)
+                                if result:
+                                    region_label = result[0]["label"]
+                                    region_prob = result[0]["prob"]
+                        except:
+                            pass
+                    
+                    if region_prob < 0.05:
+                        region_mean = img[mask].mean(axis=0)
+                        region_label = classify_region(region_mean, area, img.shape)
+                    
+                    objects.append({
+                        "id": len(objects) + 1,
+                        "label": region_label,
+                        "confidence": round(float(region_prob), 3),
+                        "score": round(float(scores[0]), 3),
+                        "bbox": bbox,
+                        "area": int(area),
+                        "color_image": color_b64,
+                        "mask": mask_b64,
+                    })
+                    
+                except Exception:
+                    continue
+            
+            if len(objects) >= 15:
+                break
+        
+        return {
+            "success": True,
+            "image_id": image_id,
+            "objects": objects,
+            "count": len(objects)
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 # ── 启动 ──
 # 尝试加载默认模型
 MODELS_DIR.mkdir(exist_ok=True)

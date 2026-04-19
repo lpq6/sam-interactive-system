@@ -15,6 +15,8 @@ export default function App() {
   const [detectResult, setDetectResult] = useState(null)
   const [recognizeResult, setRecognizeResult] = useState(null)
   const [autoSegResult, setAutoSegResult] = useState(null)
+  const [colorObjects, setColorObjects] = useState(null)
+  const [selectedColorObj, setSelectedColorObj] = useState(null)
 
   const canvasRef = useRef(null)
   const overlayRef = useRef(null)
@@ -290,6 +292,49 @@ export default function App() {
     setLoading(false)
   }, [image])
 
+  // ── Extract colored objects (提取彩色物体) ──
+  const runExtractColors = useCallback(async () => {
+    if (!image) return
+    setLoading(true)
+    setColorObjects(null)
+
+    try {
+      const res = await fetch(`${API}/api/extract/all?image_id=${image.id}&min_area=500`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const data = await res.json()
+      setColorObjects(data)
+
+      // 在画布上显示彩色叠加图
+      if (data.overlay && canvasRef.current && imgRef.current) {
+        const ctx = canvasRef.current.getContext('2d')
+        const img = new Image()
+        img.onload = () => {
+          ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+          ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height)
+        }
+        img.src = `data:image/png;base64,${data.overlay}`
+      }
+    } catch (e) {
+      setColorObjects({ success: false, message: e.message })
+    }
+    setLoading(false)
+  }, [image])
+
+  // ── Show single colored object on canvas ──
+  const showColorObject = useCallback((obj) => {
+    if (!canvasRef.current || !imgRef.current) return
+    const ctx = canvasRef.current.getContext('2d')
+    const img = new Image()
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+      ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height)
+    }
+    img.src = `data:image/png;base64,${obj.color_image}`
+    setSelectedColorObj(obj)
+  }, [])
+
   // ── Draw box on canvas ──
   const drawBox = box && !isDrawing ? null : null  // handled via CSS
 
@@ -396,6 +441,13 @@ export default function App() {
                 🏷️ 识别
               </button>
               <button className="btn btn-secondary" onClick={clearAll}>🗑️ 清除</button>
+            </div>
+            <div className="actions-row" style={{ marginTop: '0.5rem' }}>
+              <button className="btn btn-primary" onClick={runExtractColors}
+                disabled={loading || !image}
+                style={{ width: '100%' }}>
+                {loading ? '⏳ 提取中...' : '🎨 提取彩色物体'}
+              </button>
             </div>
           </div>
         </aside>
@@ -751,6 +803,122 @@ export default function App() {
                     }} title={`${(c.ratio * 100).toFixed(1)}%`} />
                   ))}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Color Objects Results */}
+          {colorObjects?.success && (
+            <div className="tool-section">
+              <h3>🎨 彩色物体提取 ({colorObjects.count} 个)</h3>
+              
+              {/* 彩色物体网格 */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '0.5rem',
+                maxHeight: '300px',
+                overflowY: 'auto',
+                padding: '0.25rem'
+              }}>
+                {colorObjects.objects.map((obj, i) => (
+                  <div
+                    key={i}
+                    onClick={() => showColorObject(obj)}
+                    style={{
+                      cursor: 'pointer',
+                      border: selectedColorObj?.id === obj.id ? '2px solid var(--primary)' : '1px solid var(--border)',
+                      borderRadius: '8px',
+                      padding: '0.25rem',
+                      background: 'var(--bg-tertiary)',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                    onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                  >
+                    <img
+                      src={`data:image/png;base64,${obj.color_image}`}
+                      alt={obj.label}
+                      style={{
+                        width: '100%',
+                        height: '60px',
+                        objectFit: 'contain',
+                        borderRadius: '4px',
+                        background: 'repeating-conic-gradient(#ddd 0% 25%, white 0% 50%) 50% / 10px 10px'
+                      }}
+                    />
+                    <div style={{
+                      fontSize: '0.65rem',
+                      textAlign: 'center',
+                      marginTop: '0.25rem',
+                      color: 'var(--text-secondary)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {obj.label}
+                    </div>
+                    <div style={{
+                      fontSize: '0.6rem',
+                      textAlign: 'center',
+                      color: 'var(--text-muted)'
+                    }}>
+                      {obj.confidence ? `${(obj.confidence * 100).toFixed(0)}%` : `${(obj.score * 100).toFixed(0)}%`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 选中物体详情 */}
+              {selectedColorObj && (
+                <div style={{
+                  marginTop: '0.75rem',
+                  padding: '0.75rem',
+                  background: 'var(--bg-tertiary)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <img
+                      src={`data:image/png;base64,${selectedColorObj.color_image}`}
+                      alt={selectedColorObj.label}
+                      style={{
+                        width: '60px',
+                        height: '60px',
+                        objectFit: 'contain',
+                        borderRadius: '4px',
+                        background: 'repeating-conic-gradient(#ddd 0% 25%, white 0% 50%) 50% / 10px 10px'
+                      }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--primary)' }}>
+                        {selectedColorObj.label}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        置信度: {selectedColorObj.confidence ? `${(selectedColorObj.confidence * 100).toFixed(1)}%` : `${(selectedColorObj.score * 100).toFixed(1)}%`}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        面积: {selectedColorObj.area?.toLocaleString()} px
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      const a = document.createElement('a')
+                      a.href = `data:image/png;base64,${selectedColorObj.color_image}`
+                      a.download = `${selectedColorObj.label}.png`
+                      a.click()
+                    }}
+                    style={{ width: '100%' }}
+                  >
+                    💾 下载彩色物体
+                  </button>
+                </div>
+              )}
+
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.5rem', textAlign: 'center' }}>
+                💡 点击物体缩略图查看详情并下载
               </div>
             </div>
           )}
