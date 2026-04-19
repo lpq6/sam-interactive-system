@@ -287,6 +287,102 @@ def find_image(image_id: str) -> Optional[Path]:
             return f
     return None
 
+
+# ── 掩码编辑工具 ──
+def apply_brush_stroke(mask: np.ndarray, x: int, y: int, radius: int = 10, 
+                       mode: str = 'add') -> np.ndarray:
+    """
+    在掩码上应用画笔笔触
+    
+    参数:
+        mask: 原始掩码
+        x, y: 笔触中心坐标
+        radius: 笔触半径
+        mode: 'add' (添加) 或 'erase' (擦除)
+    
+    返回:
+        修改后的掩码
+    """
+    h, w = mask.shape[:2]
+    Y, X = np.ogrid[:h, :w]
+    dist = np.sqrt((X - x)**2 + (Y - y)**2)
+    stroke = dist <= radius
+    
+    if mode == 'add':
+        return mask | stroke
+    else:  # erase
+        return mask & ~stroke
+
+
+def apply_brush_strokes(mask: np.ndarray, strokes: List[dict]) -> np.ndarray:
+    """
+    批量应用画笔笔触
+    
+    参数:
+        mask: 原始掩码
+        strokes: 笔触列表 [{"x": int, "y": int, "radius": int, "mode": "add"|"erase"}]
+    
+    返回:
+        修改后的掩码
+    """
+    result = mask.copy()
+    for stroke in strokes:
+        result = apply_brush_stroke(
+            result,
+            stroke['x'],
+            stroke['y'],
+            stroke.get('radius', 10),
+            stroke.get('mode', 'add')
+        )
+    return result
+
+
+# ── 掩码历史记录 ──
+class MaskHistory:
+    def __init__(self, max_size: int = 20):
+        self.history = []
+        self.current = -1
+        self.max_size = max_size
+    
+    def push(self, mask: np.ndarray):
+        """添加新掩码到历史"""
+        # 删除当前位置之后的历史
+        self.history = self.history[:self.current + 1]
+        # 添加新掩码
+        self.history.append(mask.copy())
+        # 限制历史大小
+        if len(self.history) > self.max_size:
+            self.history.pop(0)
+        self.current = len(self.history) - 1
+    
+    def undo(self) -> Optional[np.ndarray]:
+        """撤销到上一步"""
+        if self.current > 0:
+            self.current -= 1
+            return self.history[self.current].copy()
+        return None
+    
+    def redo(self) -> Optional[np.ndarray]:
+        """重做到下一步"""
+        if self.current < len(self.history) - 1:
+            self.current += 1
+            return self.history[self.current].copy()
+        return None
+    
+    def get_current(self) -> Optional[np.ndarray]:
+        """获取当前掩码"""
+        if 0 <= self.current < len(self.history):
+            return self.history[self.current].copy()
+        return None
+    
+    def clear(self):
+        """清空历史"""
+        self.history = []
+        self.current = -1
+
+# 全局掩码历史记录
+mask_histories = {}  # image_id -> MaskHistory
+
 # ── FastAPI App ──
 app = FastAPI(title="SAM Interactive System", version="2.0.0")
 
@@ -1287,6 +1383,133 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
         
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ── 掩码编辑 API ──
+class BrushStroke(BaseModel):
+    x: int
+    y: int
+    radius: int = 10
+    mode: str = 'add'  # 'add' 或 'erase'
+
+class MaskEditRequest(BaseModel):
+    image_id: str
+    mask_base64: str
+    strokes: List[BrushStroke]
+
+class MaskUndoRequest(BaseModel):
+    image_id: str
+
+@app.post("/api/mask/edit")
+async def edit_mask(req: MaskEditRequest):
+    """
+    编辑掩码 - 使用画笔添加或擦除掩码区域
+    
+    参数:
+        image_id: 图片 ID
+        mask_base64: 当前掩码的 base64 编码
+        strokes: 笔触列表
+    
+    返回:
+        编辑后的掩码
+    """
+    try:
+        # 解码原始掩码
+        mask_bytes = base64.b64decode(req.mask_base64)
+        mask_img = Image.open(io.BytesIO(mask_bytes)).convert('L')
+        mask = np.array(mask_img) > 128
+        
+        # 保存到历史
+        if req.image_id not in mask_histories:
+            mask_histories[req.image_id] = MaskHistory()
+        mask_histories[req.image_id].push(mask)
+        
+        # 应用笔触
+        strokes_data = [s.dict() for s in req.strokes]
+        edited_mask = apply_brush_strokes(mask, strokes_data)
+        
+        # 保存编辑后到历史
+        mask_histories[req.image_id].push(edited_mask)
+        
+        # 编码返回
+        result_img = Image.fromarray((edited_mask * 255).astype(np.uint8))
+        buf = io.BytesIO()
+        result_img.save(buf, format="PNG")
+        mask_b64 = base64.b64encode(buf.getvalue()).decode()
+        
+        return {
+            "success": True,
+            "mask": mask_b64,
+            "area": int(edited_mask.sum()),
+            "can_undo": mask_histories[req.image_id].current > 0,
+            "can_redo": mask_histories[req.image_id].current < len(mask_histories[req.image_id].history) - 1
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/mask/undo")
+async def undo_mask(req: MaskUndoRequest):
+    """
+    撤销掩码编辑
+    
+    参数:
+        image_id: 图片 ID
+    
+    返回:
+        上一步的掩码
+    """
+    if req.image_id not in mask_histories:
+        return {"success": False, "error": "没有历史记录"}
+    
+    mask = mask_histories[req.image_id].undo()
+    if mask is None:
+        return {"success": False, "error": "无法撤销"}
+    
+    result_img = Image.fromarray((mask * 255).astype(np.uint8))
+    buf = io.BytesIO()
+    result_img.save(buf, format="PNG")
+    mask_b64 = base64.b64encode(buf.getvalue()).decode()
+    
+    return {
+        "success": True,
+        "mask": mask_b64,
+        "area": int(mask.sum()),
+        "can_undo": mask_histories[req.image_id].current > 0,
+        "can_redo": mask_histories[req.image_id].current < len(mask_histories[req.image_id].history) - 1
+    }
+
+
+@app.post("/api/mask/redo")
+async def redo_mask(req: MaskUndoRequest):
+    """
+    重做掩码编辑
+    
+    参数:
+        image_id: 图片 ID
+    
+    返回:
+        下一步的掩码
+    """
+    if req.image_id not in mask_histories:
+        return {"success": False, "error": "没有历史记录"}
+    
+    mask = mask_histories[req.image_id].redo()
+    if mask is None:
+        return {"success": False, "error": "无法重做"}
+    
+    result_img = Image.fromarray((mask * 255).astype(np.uint8))
+    buf = io.BytesIO()
+    result_img.save(buf, format="PNG")
+    mask_b64 = base64.b64encode(buf.getvalue()).decode()
+    
+    return {
+        "success": True,
+        "mask": mask_b64,
+        "area": int(mask.sum()),
+        "can_undo": mask_histories[req.image_id].current > 0,
+        "can_redo": mask_histories[req.image_id].current < len(mask_histories[req.image_id].history) - 1
+    }
 
 
 # ── 启动 ──

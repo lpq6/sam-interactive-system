@@ -4,7 +4,7 @@ const API = 'http://localhost:8000'  // 直连后端
 
 export default function App() {
   const [image, setImage] = useState(null)         // {id, width, height, url}
-  const [tool, setTool] = useState('point')         // point | box
+  const [tool, setTool] = useState('point')         // point | box | brush
   const [points, setPoints] = useState([])          // [{x, y, label}]
   const [box, setBox] = useState(null)              // {x1, y1, x2, y2} | null
   const [isDrawing, setIsDrawing] = useState(false)
@@ -18,6 +18,12 @@ export default function App() {
   const [colorObjects, setColorObjects] = useState(null)
   const [selectedColorObj, setSelectedColorObj] = useState(null)
   const [theme, setTheme] = useState('dark')        // dark | light
+  
+  // 掩码编辑状态
+  const [brushMode, setBrushMode] = useState('add')  // add | erase
+  const [brushSize, setBrushSize] = useState(15)
+  const [currentMask, setCurrentMask] = useState(null)  // base64
+  const [brushStrokes, setBrushStrokes] = useState([])
 
   const canvasRef = useRef(null)
   const overlayRef = useRef(null)
@@ -99,6 +105,69 @@ export default function App() {
     setLoading(false)
   }, [])
 
+  // ── Brush editing ──
+  const handleBrushEdit = useCallback(async (x, y) => {
+    if (!currentMask || !image) return
+    
+    // 添加笔触到列表
+    const newStrokes = [...brushStrokes, { x, y, radius: brushSize, mode: brushMode }]
+    setBrushStrokes(newStrokes)
+    
+    try {
+      const res = await fetch(`${API}/api/mask/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_id: image.id,
+          mask_base64: currentMask,
+          strokes: [{ x, y, radius: brushSize, mode: brushMode }]
+        })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setCurrentMask(data.mask)
+      }
+    } catch (e) {
+      console.error('画笔编辑失败:', e)
+    }
+  }, [currentMask, image, brushStrokes, brushSize, brushMode])
+
+  // ── Undo mask edit ──
+  const undoMaskEdit = useCallback(async () => {
+    if (!image) return
+    try {
+      const res = await fetch(`${API}/api/mask/undo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_id: image.id })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setCurrentMask(data.mask)
+      }
+    } catch (e) {
+      console.error('撤销失败:', e)
+    }
+  }, [image])
+
+  // ── Redo mask edit ──
+  const redoMaskEdit = useCallback(async () => {
+    if (!image) return
+    try {
+      const res = await fetch(`${API}/api/mask/redo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_id: image.id })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setCurrentMask(data.mask)
+      }
+    } catch (e) {
+      console.error('重做失败:', e)
+    }
+  }, [image])
+
   // ── Draw image on canvas ──
   useEffect(() => {
     if (!image || !canvasRef.current) return
@@ -127,9 +196,9 @@ export default function App() {
     img.src = image.url
   }, [image])
 
-  // ── Canvas click → point ──
+  // ── Canvas click → point or brush ──
   const handleCanvasClick = useCallback((e) => {
-    if (tool !== 'point' || !imgRef.current) return
+    if (!imgRef.current) return
     const rect = canvasRef.current.getBoundingClientRect()
     const dx = e.clientX - rect.left
     const dy = e.clientY - rect.top
@@ -137,7 +206,14 @@ export default function App() {
     const { dw, dh, sw, sh } = imgRef.current
     const ox = dx * sw / dw
     const oy = dy * sh / dh
-    const label = e.shiftKey ? 0 : 1  // shift = background
+    
+    if (tool === 'point') {
+      const label = e.shiftKey ? 0 : 1  // shift = background
+      setPoints(prev => [...prev, { x: ox, y: oy, label, dx, dy }])
+    } else if (tool === 'brush' && currentMask) {
+      handleBrushEdit(Math.round(ox), Math.round(oy))
+    }
+  }, [tool, currentMask, handleBrushEdit])
     setPoints(prev => [...prev, { x: ox, y: oy, label, dx, dy }])
   }, [tool])
 
@@ -465,8 +541,47 @@ export default function App() {
                 <span className="tool-icon">⬜</span>
                 <span>框选分割</span>
               </button>
+              <button className={`tool-btn ${tool==='brush' ? 'active' : ''}`} onClick={() => setTool('brush')}>
+                <span className="tool-icon">🖌️</span>
+                <span>画笔编辑</span>
+              </button>
             </div>
           </div>
+
+          {/* Brush settings (show when brush tool is selected) */}
+          {tool === 'brush' && (
+            <div className="tool-section">
+              <h3>🖌️ 画笔设置</h3>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <button 
+                  className={`btn ${brushMode === 'add' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                  onClick={() => setBrushMode('add')}
+                  style={{ flex: 1 }}
+                >
+                  ➕ 添加
+                </button>
+                <button 
+                  className={`btn ${brushMode === 'erase' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                  onClick={() => setBrushMode('erase')}
+                  style={{ flex: 1 }}
+                >
+                  ➖ 擦除
+                </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>大小:</span>
+                <input
+                  type="range"
+                  min="5"
+                  max="50"
+                  value={brushSize}
+                  onChange={(e) => setBrushSize(Number(e.target.value))}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ fontSize: '0.8rem', color: 'var(--text)' }}>{brushSize}px</span>
+              </div>
+            </div>
+          )}
 
           {/* Instructions */}
           <div className="tool-section">
@@ -478,10 +593,16 @@ export default function App() {
                   <p>• <b>Shift+点击</b>：标记背景</p>
                   <p>• 可添加多个点提高精度</p>
                 </>
-              ) : (
+              ) : tool === 'box' ? (
                 <>
                   <p>• <b>拖拽鼠标</b>：绘制选框</p>
                   <p>• 释放后自动分割</p>
+                </>
+              ) : (
+                <>
+                  <p>• <b>左键点击</b>：添加/擦除掩码</p>
+                  <p>• 先使用点击或框选分割</p>
+                  <p>• 再切换到画笔模式微调</p>
                 </>
               )}
             </div>
