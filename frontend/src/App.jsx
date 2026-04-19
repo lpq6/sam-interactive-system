@@ -56,6 +56,7 @@ export default function App() {
   const [training, setTraining] = useState(false)  // 是否正在训练
   const [customClasses, setCustomClasses] = useState([])  // 已训练的类别列表
   const [evaluationResult, setEvaluationResult] = useState(null)  // 模型评估结果
+  const [batchLabels, setBatchLabels] = useState([])  // 批量训练的标签数组
   
   // 原图备份（用于恢复）
   const [originalImage, setOriginalImage] = useState(null)  // 原始图片数据
@@ -2458,6 +2459,162 @@ export default function App() {
                 </button>
               </div>
             )}
+
+            {/* 批量训练 */}
+            <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+              <h4 style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>📚 批量训练</h4>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+                从多张图片批量训练分类器
+              </div>
+
+              {/* 批量训练类别管理 */}
+              {trainingClasses.length > 0 && (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
+                    为每张图片分配类别:
+                  </div>
+                  <div style={{
+                    maxHeight: '150px',
+                    overflowY: 'auto',
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    padding: '0.5rem'
+                  }}>
+                    {batchImages.map((img, i) => (
+                      <div key={i} style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        marginBottom: '0.5rem',
+                        padding: '0.3rem',
+                        background: 'var(--bg-tertiary)',
+                        borderRadius: '4px'
+                      }}>
+                        <span style={{
+                          flex: 1,
+                          fontSize: '0.75rem',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {img.filename || `图片 ${i + 1}`}
+                        </span>
+                        <select
+                          value={batchLabels[i] || ''}
+                          onChange={(e) => {
+                            const newLabels = [...batchLabels]
+                            newLabels[i] = e.target.value
+                            setBatchLabels(newLabels)
+                          }}
+                          style={{
+                            padding: '0.2rem 0.4rem',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border)',
+                            background: 'var(--bg-secondary)',
+                            color: 'var(--text)',
+                            fontSize: '0.75rem'
+                          }}
+                        >
+                          <option value="">选择类别</option>
+                          {trainingClasses.map((cls, j) => (
+                            <option key={j} value={cls}>{cls}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 统计信息 */}
+                  <div style={{
+                    fontSize: '0.75rem',
+                    color: 'var(--text-muted)',
+                    marginTop: '0.5rem',
+                    padding: '0.5rem',
+                    background: 'var(--bg-tertiary)',
+                    borderRadius: '6px'
+                  }}>
+                    📊 {batchLabels.filter(l => l).length} / {batchImages.length} 张图片已分配类别
+                    {trainingClasses.map((cls, i) => {
+                      const count = batchLabels.filter(l => l === cls).length
+                      return count > 0 ? (
+                        <span key={i} style={{ marginLeft: '0.5rem' }}>
+                          {cls}: {count}
+                        </span>
+                      ) : null
+                    })}
+                  </div>
+
+                  {/* 批量训练按钮 */}
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={async () => {
+                      // 检查是否所有图片都分配了类别
+                      const unlabeled = batchLabels.filter(l => !l).length
+                      if (unlabeled > 0) {
+                        alert(`还有 ${unlabeled} 张图片未分配类别`)
+                        return
+                      }
+
+                      // 检查每个类别至少有2张图片
+                      for (const cls of trainingClasses) {
+                        const count = batchLabels.filter(l => l === cls).length
+                        if (count < 2) {
+                          alert(`类别 "${cls}" 至少需要2张图片`)
+                          return
+                        }
+                      }
+
+                      setTraining(true)
+                      try {
+                        // 准备训练数据
+                        const images = batchImages.map((img, i) => ({
+                          image_id: img.id,
+                          label: batchLabels[i]
+                        }))
+
+                        const res = await fetch(`${API}/api/custom/batch-train`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            images,
+                            epochs: 10,
+                            lr: 0.001
+                          })
+                        })
+                        const data = await res.json()
+
+                        if (data.success) {
+                          alert(`批量训练完成!\n类别: ${data.classes.join(', ')}\n样本数: ${data.num_samples}\n最终损失: ${data.final_loss.toFixed(4)}`)
+                          setCustomClasses(data.classes)
+                        } else {
+                          alert(`训练失败: ${data.error}`)
+                        }
+                      } catch (e) {
+                        alert(`训练失败: ${e.message}`)
+                      }
+                      setTraining(false)
+                    }}
+                    disabled={training || batchImages.length === 0 || batchLabels.filter(l => !l).length > 0}
+                    style={{ width: '100%', marginTop: '0.5rem' }}
+                  >
+                    {training ? '⏳ 训练中...' : '🚀 开始批量训练'}
+                  </button>
+                </div>
+              )}
+
+              {batchImages.length === 0 && (
+                <div style={{
+                  fontSize: '0.75rem',
+                  color: 'var(--text-muted)',
+                  textAlign: 'center',
+                  padding: '1rem',
+                  background: 'var(--bg-tertiary)',
+                  borderRadius: '6px'
+                }}>
+                  💡 请先批量上传图片
+                </div>
+              )}
+            </div>
           </div>
         </aside>
       </div>

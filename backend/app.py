@@ -2724,6 +2724,100 @@ class CustomClassifier:
             "losses": losses
         }
     
+    def train_from_images(self, image_ids: List[str], labels: List[str], epochs: int = 10, lr: float = 0.001):
+        """
+        从图片批量训练分类器
+        
+        参数:
+            image_ids: 图片ID列表
+            labels: 对应的类别标签列表
+            epochs: 训练轮数
+            lr: 学习率
+        
+        返回:
+            训练结果
+        """
+        if len(image_ids) != len(labels):
+            return {"success": False, "error": "图片ID和标签数量不匹配"}
+        
+        # 收集所有类别
+        self.classes = list(set(labels))
+        num_classes = len(self.classes)
+        
+        if num_classes < 2:
+            return {"success": False, "error": "至少需要2个不同类别"}
+        
+        # 准备数据
+        images = []
+        label_indices = []
+        
+        for img_id, label in zip(image_ids, labels):
+            try:
+                path = find_image(img_id)
+                if not path:
+                    print(f"[WARN] 图片不存在: {img_id}")
+                    continue
+                
+                img = Image.open(path).convert('RGB')
+                tensor = self.transform(img)
+                images.append(tensor)
+                label_indices.append(self.classes.index(label))
+            except Exception as e:
+                print(f"[WARN] 处理图片失败 {img_id}: {e}")
+                continue
+        
+        if len(images) < num_classes * 2:
+            return {"success": False, "error": f"样本不足，每个类别至少需要2个样本"}
+        
+        # 创建数据加载器
+        images_tensor = torch.stack(images)
+        labels_tensor = torch.tensor(label_indices, dtype=torch.long)
+        
+        dataset = torch.utils.data.TensorDataset(images_tensor, labels_tensor)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=min(8, len(dataset)), shuffle=True)
+        
+        # 创建模型
+        from torchvision.models import resnet18, ResNet18_Weights
+        self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
+        self.model.fc = nn.Linear(512, num_classes)
+        
+        if torch.cuda.is_available():
+            self.model = self.model.cuda()
+        
+        # 训练
+        self.model.train()
+        optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        criterion = nn.CrossEntropyLoss()
+        
+        losses = []
+        for epoch in range(epochs):
+            epoch_loss = 0
+            for batch_images, batch_labels in loader:
+                if torch.cuda.is_available():
+                    batch_images = batch_images.cuda()
+                    batch_labels = batch_labels.cuda()
+                
+                optimizer.zero_grad()
+                outputs = self.model(batch_images)
+                loss = criterion(outputs, batch_labels)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+            
+            losses.append(epoch_loss / len(loader))
+        
+        self.model.eval()
+        self.save()
+        
+        return {
+            "success": True,
+            "classes": self.classes,
+            "num_samples": len(images),
+            "epochs": epochs,
+            "final_loss": losses[-1],
+            "losses": losses
+        }
+    
     def predict(self, image: Image.Image) -> List[dict]:
         """预测图片类别"""
         if self.model is None or not self.classes:
@@ -2772,6 +2866,30 @@ async def custom_train(req: TrainRequest):
         训练结果
     """
     result = custom_classifier.train(req.samples, req.epochs, req.lr)
+    return result
+
+class BatchTrainRequest(BaseModel):
+    images: List[dict]  # [{"image_id": "xxx", "label": "类别名"}, ...]
+    epochs: int = 10
+    lr: float = 0.001
+
+@app.post("/api/custom/batch-train")
+async def custom_batch_train(req: BatchTrainRequest):
+    """
+    批量训练自定义分类器
+    
+    参数:
+        images: 图片列表 [{"image_id": "xxx", "label": "类别名"}, ...]
+        epochs: 训练轮数（默认10）
+        lr: 学习率（默认0.001）
+    
+    返回:
+        训练结果
+    """
+    image_ids = [img["image_id"] for img in req.images]
+    labels = [img["label"] for img in req.images]
+    
+    result = custom_classifier.train_from_images(image_ids, labels, req.epochs, req.lr)
     return result
 
 @app.get("/api/custom/classes")
