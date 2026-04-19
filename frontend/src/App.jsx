@@ -821,13 +821,13 @@ export default function App() {
     }
     img.src = originalImage.url
     
-    // 清除分割结果
+    // 清除分割结果，但保留彩色物体数据
     setPoints([])
     setBox(null)
     setResult(null)
     setCurrentMask(null)
-    setColorObjects(null)
     setSelectedColorObj(null)
+    // 注意：不清除 colorObjects，保留彩色物体列表供点击查看
   }, [originalImage])
 
   // ── Show single colored object on canvas ──
