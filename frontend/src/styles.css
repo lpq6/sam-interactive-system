@@ -543,3 +543,15 @@ body {
     border-bottom: 1px solid var(--border);
   }
 }
+
+/* ── Keyboard Shortcuts ── */
+kbd {
+  background: var(--bg-hover);
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+  font-size: 0.7rem;
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}

@@ -23,6 +23,52 @@ export default function App() {
   const fileInputRef = useRef(null)
   const imgRef = useRef(null)
 
+  // ── Keyboard shortcuts ──
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ignore if typing in input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      
+      switch (e.key) {
+        case '1':
+          setTool('point')
+          break
+        case '2':
+          setTool('box')
+          break
+        case 'd':
+        case 'D':
+          if (image && !loading) runAutoDetect()
+          break
+        case 's':
+        case 'S':
+          if (image && !loading) runAutoSegment()
+          break
+        case 'r':
+        case 'R':
+          if (image && !loading) runRecognize()
+          break
+        case 'c':
+        case 'C':
+          if (image && !loading) runExtractColors()
+          break
+        case 'Escape':
+          clearAll()
+          break
+        case 'z':
+        case 'Z':
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault()
+            setPoints(prev => prev.slice(0, -1))
+          }
+          break
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [image, loading, runAutoDetect, runAutoSegment, runRecognize, runExtractColors])
+
   // ── Health check ──
   useEffect(() => {
     fetch(`${API}/api/health`).then(r => r.json()).then(setHealth).catch(() => {})
@@ -448,6 +494,91 @@ export default function App() {
                 style={{ width: '100%' }}>
                 {loading ? '⏳ 提取中...' : '🎨 提取彩色物体'}
               </button>
+            </div>
+          </div>
+
+          {/* Keyboard Shortcuts */}
+          <div className="tool-section">
+            <h3>⌨️ 快捷键</h3>
+            <div style={{ 
+              fontSize: '0.75rem', 
+              color: 'var(--text-muted)', 
+              lineHeight: 1.8,
+              display: 'grid',
+              gridTemplateColumns: 'auto 1fr',
+              gap: '0.25rem 0.75rem'
+            }}>
+              <kbd style={{ 
+                background: 'var(--bg-hover)', 
+                padding: '0.1rem 0.4rem', 
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '0.7rem'
+              }}>1</kbd>
+              <span>点击分割</span>
+              
+              <kbd style={{ 
+                background: 'var(--bg-hover)', 
+                padding: '0.1rem 0.4rem', 
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '0.7rem'
+              }}>2</kbd>
+              <span>框选分割</span>
+              
+              <kbd style={{ 
+                background: 'var(--bg-hover)', 
+                padding: '0.1rem 0.4rem', 
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '0.7rem'
+              }}>D</kbd>
+              <span>自动检测</span>
+              
+              <kbd style={{ 
+                background: 'var(--bg-hover)', 
+                padding: '0.1rem 0.4rem', 
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '0.7rem'
+              }}>S</kbd>
+              <span>自动分割</span>
+              
+              <kbd style={{ 
+                background: 'var(--bg-hover)', 
+                padding: '0.1rem 0.4rem', 
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '0.7rem'
+              }}>R</kbd>
+              <span>图像识别</span>
+              
+              <kbd style={{ 
+                background: 'var(--bg-hover)', 
+                padding: '0.1rem 0.4rem', 
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '0.7rem'
+              }}>C</kbd>
+              <span>彩色提取</span>
+              
+              <kbd style={{ 
+                background: 'var(--bg-hover)', 
+                padding: '0.1rem 0.4rem', 
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '0.7rem'
+              }}>Esc</kbd>
+              <span>清除所有</span>
+              
+              <kbd style={{ 
+                background: 'var(--bg-hover)', 
+                padding: '0.1rem 0.4rem', 
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '0.7rem'
+              }}>Ctrl+Z</kbd>
+              <span>撤销标记</span>
             </div>
           </div>
         </aside>
