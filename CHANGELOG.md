@@ -1,5 +1,27 @@
 # 更新日志 / CHANGELOG
 
+## [v1.8.0] - 2026-04-19
+
+### 📋 分割历史记录功能
+
+#### 功能
+- ✅ 分割历史记录保存
+- ✅ 历史记录列表显示
+- ✅ 点击恢复历史分割结果
+- ✅ 删除单条历史记录
+- ✅ 清空所有历史记录
+
+#### API 端点
+- `GET /api/history/{image_id}` - 获取历史记录列表
+- `POST /api/history/get` - 获取单条历史详情
+- `DELETE /api/history/{image_id}/{entry_id}` - 删除单条记录
+- `DELETE /api/history/{image_id}` - 清空所有历史
+
+#### 技术实现
+- `SegmentationHistory`: 分割历史记录类
+- 前端历史记录面板
+- 自动保存分割结果到历史
+
 ## [v1.7.0] - 2026-04-19
 
 ### 🖌️ 掩码编辑（擦除/画笔）功能
