@@ -1,5 +1,32 @@
 # 更新日志 / CHANGELOG
 
+## [v1.12.0] - 2026-04-19
+
+### 📦 标注导出（COCO/YOLO）
+
+#### 新增功能
+- ✅ COCO 格式导出 (`/api/export/coco/{image_id}`)
+- ✅ YOLO 格式导出 (`/api/export/yolo/{image_id}`)
+- ✅ 前端 COCO/YOLO 导出按钮
+
+#### COCO 格式说明
+- 标准 COCO JSON 格式
+- 包含 `images`, `annotations`, `categories`
+- 支持边界框和面积信息
+- 可直接用于 COCO 数据集训练
+
+#### YOLO 格式说明
+- 标准 YOLO TXT 格式
+- 归一化坐标: `class_id center_x center_y width height`
+- ZIP 包包含:
+  - `{image_id}.txt` - 标注文件
+  - `classes.txt` - 类别文件
+  - 原始图片
+
+#### 使用说明
+1. 完成分割后，点击"导出 COCO 格式"或"导出 YOLO 格式"
+2. 下载文件可直接用于机器学习训练
+
 ## [v1.11.1] - 2026-04-19
 
 ### 🎨 优化批量图片管理和彩色提取
