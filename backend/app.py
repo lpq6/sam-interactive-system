@@ -5,6 +5,7 @@ SAM 交互式分割系统 - 后端服务
 import os, io, uuid, base64, json
 from pathlib import Path
 from typing import Optional, List
+from datetime import datetime
 from contextlib import asynccontextmanager
 
 import numpy as np
@@ -1768,6 +1769,124 @@ async def clear_history(image_id: str):
     segmentation_histories[image_id].clear()
     return {"success": True}
 
+# ── 导出格式扩展 ──
+@app.get("/api/export/json/{image_id}")
+async def export_json(image_id: str, entry_id: str = None):
+    """
+    导出 JSON 格式
+    
+    参数:
+        image_id: 图片 ID
+        entry_id: 历史记录 ID（可选，为空则导出所有记录）
+    
+    返回:
+        JSON 文件
+    """
+    import tempfile
+    import os
+    
+    if image_id not in segmentation_histories:
+        raise HTTPException(404, "没有找到该图片的分割记录")
+    
+    history = segmentation_histories[image_id]
+    
+    if entry_id:
+        # 导出单条记录
+        entry = history.get_entry(entry_id)
+        if not entry:
+            raise HTTPException(404, "没有找到该记录")
+        export_data = [entry]
+    else:
+        # 导出所有记录
+        export_data = history.history
+    
+    # 添加元数据
+    export_data_with_meta = {
+        "image_id": image_id,
+        "export_time": str(datetime.now()),
+        "model_type": sam.model_type,
+        "device": sam.device,
+        "records": export_data
+    }
+    
+    # 创建临时文件
+    temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8')
+    json.dump(export_data_with_meta, temp_file, ensure_ascii=False, indent=2)
+    temp_file.close()
+    
+    return FileResponse(
+        temp_file.name,
+        media_type="application/json",
+        filename=f"sam_export_{image_id}.json",
+        background=lambda: os.unlink(temp_file.name)
+    )
+
+@app.get("/api/export/csv/{image_id}")
+async def export_csv(image_id: str, entry_id: str = None):
+    """
+    导出 CSV 格式
+    
+    参数:
+        image_id: 图片 ID
+        entry_id: 历史记录 ID（可选，为空则导出所有记录）
+    
+    返回:
+        CSV 文件
+    """
+    import tempfile
+    import os
+    import csv
+    
+    if image_id not in segmentation_histories:
+        raise HTTPException(404, "没有找到该图片的分割记录")
+    
+    history = segmentation_histories[image_id]
+    
+    if entry_id:
+        entry = history.get_entry(entry_id)
+        if not entry:
+            raise HTTPException(404, "没有找到该记录")
+        entries = [entry]
+    else:
+        entries = history.history
+    
+    # 创建临时文件
+    temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8-sig', newline='')
+    
+    writer = csv.writer(temp_file)
+    
+    # 写入表头
+    writer.writerow([
+        "ID", "标签", "置信度", "分数",
+        "边界框_x1", "边界框_y1", "边界框_x2", "边界框_y2",
+        "面积", "创建时间"
+    ])
+    
+    # 写入数据
+    for entry in entries:
+        d = entry if isinstance(entry, dict) else entry.to_dict()
+        bbox = d.get("box", [0, 0, 0, 0]) or [0, 0, 0, 0]
+        writer.writerow([
+            d.get("id", ""),
+            d.get("label", ""),
+            d.get("score", 0),
+            d.get("score", 0),
+            bbox[0] if len(bbox) > 0 else 0,
+            bbox[1] if len(bbox) > 1 else 0,
+            bbox[2] if len(bbox) > 2 else 0,
+            bbox[3] if len(bbox) > 3 else 0,
+            d.get("area", 0),
+            d.get("timestamp", "")
+        ])
+    
+    temp_file.close()
+    
+    return FileResponse(
+        temp_file.name,
+        media_type="text/csv",
+        filename=f"sam_export_{image_id}.csv",
+        background=lambda: os.unlink(temp_file.name)
+    )
 
 # ── 启动 ──
 # 尝试加载默认模型

@@ -217,6 +217,31 @@ export default function App() {
     }
   }, [image])
 
+  // ── 导出历史记录 ──
+  const exportHistory = useCallback(async (format) => {
+    if (!image) return
+    try {
+      const url = `${API}/api/export/${format}/${image.id}`
+      const response = await fetch(url)
+      
+      if (!response.ok) {
+        throw new Error('导出失败')
+      }
+      
+      const blob = await response.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = `sam_export_${image.id}.${format}`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(downloadUrl)
+    } catch (e) {
+      alert('导出失败: ' + e.message)
+    }
+  }, [image])
+
   // ── Fetch history when image changes ──
   useEffect(() => {
     if (image) {
@@ -1405,13 +1430,32 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
               <h3 style={{ margin: 0 }}>📋 分割历史 ({history.length})</h3>
               {history.length > 0 && (
-                <button 
-                  className="btn btn-secondary btn-sm"
-                  onClick={clearHistory}
-                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
-                >
-                  🗑️ 清空
-                </button>
+                <div style={{ display: 'flex', gap: '0.25rem' }}>
+                  <button 
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => exportHistory('json')}
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
+                    title="导出 JSON"
+                  >
+                    📄 JSON
+                  </button>
+                  <button 
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => exportHistory('csv')}
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
+                    title="导出 CSV"
+                  >
+                    📊 CSV
+                  </button>
+                  <button 
+                    className="btn btn-secondary btn-sm"
+                    onClick={clearHistory}
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
+                    title="清空历史"
+                  >
+                    🗑️
+                  </button>
+                </div>
               )}
             </div>
             
