@@ -1,5 +1,27 @@
 # 更新日志 / CHANGELOG
 
+## [v1.8.3] - 2026-04-19
+
+### 🧠 模型切换功能
+
+#### 新增功能
+- ✅ 添加 `/api/models/switch` API 端点
+- ✅ 前端添加模型选择器 UI
+- ✅ 支持切换 ViT-B/L/H 模型
+- ✅ 自动检测模型文件是否存在
+- ✅ 切换时显示加载状态
+
+#### 技术实现
+- 后端: `switch_model()` 函数
+- 前端: `switchSAMModel()` 函数
+- UI: 模型选择按钮组
+- 状态: `currentModel`, `availableModels`, `switchingModel`
+
+#### 模型说明
+- ViT-B: 375MB, 速度最快
+- ViT-L: 1.2GB, 精度更高
+- ViT-H: 2.4GB, 精度最高
+
 ## [v1.8.2] - 2026-04-19
 
 ### ✨ 增强边缘平滑效果
