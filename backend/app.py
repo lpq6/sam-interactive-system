@@ -233,7 +233,7 @@ def smooth_mask(mask: np.ndarray, blur_radius: int = 3, feather: bool = True) ->
     return np.array(smoothed)
 
 
-def create_rgba_from_mask(img: np.ndarray, mask: np.ndarray, smooth: bool = True) -> np.ndarray:
+def create_rgba_from_mask(img: np.ndarray, mask: np.ndarray, smooth: bool = True, blur_radius: int = 5) -> np.ndarray:
     """
     从掩码创建 RGBA 图像（透明背景）
     
@@ -241,6 +241,7 @@ def create_rgba_from_mask(img: np.ndarray, mask: np.ndarray, smooth: bool = True
         img: RGB 图像
         mask: 分割掩码
         smooth: 是否平滑边缘
+        blur_radius: 模糊半径（默认5，更大的值边缘更平滑）
     
     返回:
         RGBA 图像 (透明背景)
@@ -251,7 +252,7 @@ def create_rgba_from_mask(img: np.ndarray, mask: np.ndarray, smooth: bool = True
     
     if smooth:
         # 平滑掩码边缘
-        alpha = smooth_mask(mask, blur_radius=3, feather=True)
+        alpha = smooth_mask(mask, blur_radius=blur_radius, feather=True)
         rgba[:, :, 3] = alpha
     else:
         # 原始二值掩码
@@ -667,14 +668,14 @@ async def segment_by_point(req: PointPrompt):
     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())] if len(xs) > 0 else None
 
     # 生成平滑掩码
-    smooth_alpha = smooth_mask(mask, blur_radius=3, feather=True)
+    smooth_alpha = smooth_mask(mask, blur_radius=5, feather=True)
     smooth_mask_img = Image.fromarray(smooth_alpha, 'L')
     buf = io.BytesIO()
     smooth_mask_img.save(buf, format="PNG")
     smooth_mask_b64 = base64.b64encode(buf.getvalue()).decode()
 
     # 生成平滑 RGBA 图像
-    rgba = create_rgba_from_mask(img, mask, smooth=True)
+    rgba = create_rgba_from_mask(img, mask, smooth=True, blur_radius=5)
     rgba_img = Image.fromarray(rgba, 'RGBA')
     rgba_buf = io.BytesIO()
     rgba_img.save(rgba_buf, format="PNG")
@@ -743,14 +744,14 @@ async def segment_by_box(req: BoxPrompt):
     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())] if len(xs) > 0 else None
 
     # 生成平滑掩码
-    smooth_alpha = smooth_mask(mask, blur_radius=3, feather=True)
+    smooth_alpha = smooth_mask(mask, blur_radius=5, feather=True)
     smooth_mask_img = Image.fromarray(smooth_alpha, 'L')
     buf = io.BytesIO()
     smooth_mask_img.save(buf, format="PNG")
     smooth_mask_b64 = base64.b64encode(buf.getvalue()).decode()
 
     # 生成平滑 RGBA 图像
-    rgba = create_rgba_from_mask(img, mask, smooth=True)
+    rgba = create_rgba_from_mask(img, mask, smooth=True, blur_radius=5)
     rgba_img = Image.fromarray(rgba, 'RGBA')
     rgba_buf = io.BytesIO()
     rgba_img.save(rgba_buf, format="PNG")
@@ -1465,7 +1466,7 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                         continue
                     
                     # 提取彩色物体（平滑边缘，透明背景）
-                    rgba = create_rgba_from_mask(img, mask, smooth=True)
+                    rgba = create_rgba_from_mask(img, mask, smooth=True, blur_radius=5)
                     
                     y1, y2 = ys.min(), ys.max()
                     x1, x2 = xs.min(), xs.max()
@@ -1478,7 +1479,7 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                     color_b64 = base64.b64encode(buffer.getvalue()).decode()
                     
                     # 生成平滑掩码base64
-                    smooth_alpha = smooth_mask(mask, blur_radius=3, feather=True)
+                    smooth_alpha = smooth_mask(mask, blur_radius=5, feather=True)
                     mask_img = Image.fromarray(smooth_alpha, 'L')
                     mask_buffer = io.BytesIO()
                     mask_img.save(mask_buffer, format='PNG')
