@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 .vite/
 dist/
-node_modules/
+backend/venv/
+backend/models/
+*.log
 __pycache__/
-*.pyc
+node_modules/
