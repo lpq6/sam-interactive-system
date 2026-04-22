@@ -193,6 +193,35 @@ class ImageClassifier:
 classifier = ImageClassifier()
 
 # ── 图像工具 ──
+def crop_object_with_mask(img: np.ndarray, mask: np.ndarray, margin: int = 10) -> Image.Image:
+    """
+    用掩码裁剪物体区域，背景设为白色（提升 ResNet 识别准确率）
+
+    参数:
+        img: RGB 图像
+        mask: 分割掩码 (bool)
+        margin: 边距像素
+
+    返回:
+        PIL Image (白底物体)
+    """
+    h, w = img.shape[:2]
+    ys, xs = np.where(mask)
+    if len(ys) == 0:
+        return Image.fromarray(img)
+
+    y1, y2 = max(0, ys.min() - margin), min(h, ys.max() + margin + 1)
+    x1, x2 = max(0, xs.min() - margin), min(w, xs.max() + margin + 1)
+
+    cropped_img = img[y1:y2, x1:x2].copy()
+    cropped_mask = mask[y1:y2, x1:x2]
+
+    # 背景设为白色
+    cropped_img[~cropped_mask] = [255, 255, 255]
+
+    return Image.fromarray(cropped_img)
+
+
 def mask_to_base64(mask: np.ndarray) -> str:
     img = Image.fromarray((mask * 255).astype(np.uint8))
     buf = io.BytesIO()
@@ -626,18 +655,20 @@ async def batch_process(image_ids: List[str], min_confidence: float = 0.3):
                         ys, xs = np.where(mask)
                         bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
                         
-                        # 用 ResNet 识别
+                        # 用 ResNet 识别（掩码裁剪 + top_k=5）
                         region_label = "未知"
                         region_prob = 0.0
                         if classifier.model:
                             try:
-                                x1, y1, x2, y2 = bbox
-                                margin = 5
-                                crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
-                                if crop.size > 0:
-                                    crop_pil = Image.fromarray(crop)
-                                    result = classifier.classify(crop_pil, top_k=1)
-                                    if result:
+                                crop_pil = crop_object_with_mask(img, mask, margin=10)
+                                result = classifier.classify(crop_pil, top_k=5)
+                                if result:
+                                    for r in result:
+                                        if r["prob"] >= min_confidence and r["label"] not in generic_labels:
+                                            region_label = r["label"]
+                                            region_prob = r["prob"]
+                                            break
+                                    else:
                                         region_label = result[0]["label"]
                                         region_prob = result[0]["prob"]
                             except:
@@ -720,17 +751,19 @@ async def segment_by_point(req: PointPrompt):
     if req.image_id not in segmentation_histories:
         segmentation_histories[req.image_id] = SegmentationHistory()
     
-    # 尝试识别物体标签
+    # 尝试识别物体标签（掩码裁剪 + top_k=5）
     label = "分割区域"
     if classifier.model:
         try:
-            x1, y1, x2, y2 = bbox
-            margin = 5
-            crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
-            if crop.size > 0:
-                crop_pil = Image.fromarray(crop)
-                result = classifier.classify(crop_pil, top_k=1)
-                if result:
+            crop_pil = crop_object_with_mask(img, best_mask, margin=10)
+            result = classifier.classify(crop_pil, top_k=5)
+            if result:
+                generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
+                for r in result:
+                    if r["label"] not in generic_labels:
+                        label = r["label"]
+                        break
+                else:
                     label = result[0]["label"]
         except:
             pass
@@ -796,17 +829,19 @@ async def segment_by_box(req: BoxPrompt):
     if req.image_id not in segmentation_histories:
         segmentation_histories[req.image_id] = SegmentationHistory()
     
-    # 尝试识别物体标签
+    # 尝试识别物体标签（掩码裁剪 + top_k=5）
     label = "分割区域"
     if classifier.model:
         try:
-            x1, y1, x2, y2 = bbox
-            margin = 5
-            crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
-            if crop.size > 0:
-                crop_pil = Image.fromarray(crop)
-                result = classifier.classify(crop_pil, top_k=1)
-                if result:
+            crop_pil = crop_object_with_mask(img, best_mask, margin=10)
+            result = classifier.classify(crop_pil, top_k=5)
+            if result:
+                generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
+                for r in result:
+                    if r["label"] not in generic_labels:
+                        label = r["label"]
+                        break
+                else:
                     label = result[0]["label"]
         except:
             pass
@@ -926,18 +961,23 @@ async def auto_detect(req: AutoDetectRequest):
                     ys, xs = np.where(mask)
                     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
 
-                    # 用 ResNet 识别该区域
+                    # 用 ResNet 识别该区域（掩码裁剪，白底去背景干扰）
                     region_label = "未知"
                     region_prob = 0.0
                     if classifier.model:
                         try:
-                            x1, y1, x2, y2 = bbox
-                            margin = 5
-                            crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
-                            if crop.size > 0:
-                                crop_pil = Image.fromarray(crop)
-                                result = classifier.classify(crop_pil, top_k=1)
-                                if result:
+                            crop_pil = crop_object_with_mask(img, mask, margin=10)
+                            result = classifier.classify(crop_pil, top_k=5)
+                            if result:
+                                # 遍历备选标签，找第一个非泛化标签
+                                generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
+                                for r in result:
+                                    if r["prob"] >= 0.15 and r["label"] not in generic_labels:
+                                        region_label = r["label"]
+                                        region_prob = r["prob"]
+                                        break
+                                else:
+                                    # 全是泛化标签，用第一个
                                     region_label = result[0]["label"]
                                     region_prob = result[0]["prob"]
                         except:
@@ -1061,19 +1101,21 @@ async def auto_segment(req: AutoSegmentRequest):
                     ys, xs = np.where(mask)
                     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
 
-                    # 用 ResNet 识别该区域
+                    # 用 ResNet 识别该区域（掩码裁剪，白底去背景干扰）
                     region_label = "未知"
                     region_prob = 0.0
                     if classifier.model:
                         try:
-                            x1, y1, x2, y2 = bbox
-                            # 裁剪区域，保留一些边距
-                            margin = 5
-                            crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
-                            if crop.size > 0:
-                                crop_pil = Image.fromarray(crop)
-                                result = classifier.classify(crop_pil, top_k=1)
-                                if result:
+                            crop_pil = crop_object_with_mask(img, mask, margin=10)
+                            result = classifier.classify(crop_pil, top_k=5)
+                            if result:
+                                generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
+                                for r in result:
+                                    if r["prob"] >= 0.15 and r["label"] not in generic_labels:
+                                        region_label = r["label"]
+                                        region_prob = r["prob"]
+                                        break
+                                else:
                                     region_label = result[0]["label"]
                                     region_prob = result[0]["prob"]
                         except Exception as e:
@@ -1308,18 +1350,21 @@ async def detect_objects(file: UploadFile = File(...)):
                     ys, xs = np.where(mask)
                     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
 
-                    # 用 ResNet 识别该区域
+                    # 用 ResNet 识别该区域（掩码裁剪）
                     region_label = "未知"
                     region_prob = 0.0
                     if classifier.model:
                         try:
-                            x1, y1, x2, y2 = bbox
-                            margin = 5
-                            crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
-                            if crop.size > 0:
-                                crop_pil = Image.fromarray(crop)
-                                result = classifier.classify(crop_pil, top_k=1)
-                                if result:
+                            crop_pil = crop_object_with_mask(img, mask, margin=10)
+                            result = classifier.classify(crop_pil, top_k=5)
+                            if result:
+                                generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
+                                for r in result:
+                                    if r["prob"] >= 0.05 and r["label"] not in generic_labels:
+                                        region_label = r["label"]
+                                        region_prob = r["prob"]
+                                        break
+                                else:
                                     region_label = result[0]["label"]
                                     region_prob = result[0]["prob"]
                         except:
@@ -1411,14 +1456,14 @@ async def extract_color_object(image_id: str, mask_base64: str = None, bbox: str
 
 
 @app.post("/api/extract/all")
-async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence: float = 0.6):
+async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence: float = 0.3):
     """
-    批量提取高置信度彩色物体
+    批量提取彩色物体
     
     参数:
         image_id: 图片ID
         min_area: 最小区域面积（默认500）
-        min_confidence: 最低置信度阈值（默认0.6，即60%）
+        min_confidence: 最低置信度阈值（默认0.3，即30%）
     
     返回:
         置信度高于阈值的彩色物体列表
@@ -1476,23 +1521,23 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                     ys, xs = np.where(mask)
                     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
                     
-                    # 用 ResNet 识别该区域
+                    # 用 ResNet 识别该区域（掩码裁剪 + top_k=5）
                     region_label = "未知"
                     region_prob = 0.0
                     if classifier.model:
                         try:
-                            x1, y1, x2, y2 = bbox
-                            margin = 5
-                            crop = img[max(0,y1-margin):min(h,y2+margin), max(0,x1-margin):min(w,x2+margin)]
-                            if crop.size > 0:
-                                crop_pil = Image.fromarray(crop)
-                                result = classifier.classify(crop_pil, top_k=1)
-                                if result:
-                                    region_label = result[0]["label"]
-                                    region_prob = result[0]["prob"]
+                            crop_pil = crop_object_with_mask(img, mask, margin=10)
+                            result = classifier.classify(crop_pil, top_k=5)
+                            if result:
+                                # 遍历备选标签，找第一个通过阈值的
+                                for r in result:
+                                    if r["prob"] >= min_confidence and r["label"] not in generic_labels:
+                                        region_label = r["label"]
+                                        region_prob = r["prob"]
+                                        break
                         except:
                             pass
-                    
+
                     # 跳过低置信度和泛化标签的物体
                     if region_prob < min_confidence or region_label in generic_labels:
                         continue
