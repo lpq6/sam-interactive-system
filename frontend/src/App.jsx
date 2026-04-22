@@ -647,6 +647,10 @@ export default function App() {
 
       const data = await res.json()
       setResult(data)
+      // 设置当前掩码，供画笔编辑使用
+      if (data.success && data.mask) {
+        setCurrentMask(data.mask)
+      }
 
       // Draw overlay (原图+彩色掩码叠加) 直接在主画布上
       if (data.overlay && canvasRef.current && imgRef.current) {
