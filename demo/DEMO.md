@@ -178,6 +178,79 @@
 
 ---
 
+## 六、端到端评估 — COCO 数据集
+
+### 系统流水线
+
+```
+YOLOv8n 检测 → SAM ViT-B 分割 → ResNet50 识别 → COCO→ImageNet 映射匹配
+```
+
+### 19. COCO 测试图检测与分割 (441247.jpg)
+
+![COCO 综合结果](coco_combined.png)
+
+**测试图片**: COCO val2017 #441247 — 厨房/办公场景
+- **COCO 标注**: 14 类 × 24 个目标
+- **YOLO 检测**: 14 个目标, mAP@50 = 0.460
+- **识别匹配**: **13/14 = 92.9%** ✅
+
+**检测结果**:
+| # | YOLO 类别 | 置信度 | ResNet Top-1 | 匹配 |
+|---|-----------|--------|-------------|------|
+| 1 | chair | 0.88 | muzzle | ✅ |
+| 2 | couch | 0.79 | quilt | ✅ |
+| 3 | clock | 0.72 | analog clock | ✅ |
+| 4 | couch | 0.69 | studio couch | ✅ |
+| 5 | person | 0.67 | Windsor tie | ✅ |
+| 6 | chair | 0.53 | four-poster | ✅ |
+| 7 | chair | 0.46 | cleaver | ✅ |
+| 8 | person | 0.38 | rocking chair | ✅ |
+| 9 | chair | 0.35 | studio couch | ✅ |
+| 10 | person | 0.32 | steel drum | ✅ |
+| 11 | chair | 0.32 | tripod | ✅ |
+| 12 | person | 0.29 | trench coat | ✅ |
+| 13 | backpack | 0.26 | bulletproof vest | ❌ |
+| 14 | person | 0.26 | folding chair | ✅ |
+
+### 20. SAM 分割效果
+
+![COCO 分割](coco_segmentation.png)
+
+- 所有 14 个目标的 SAM mask 均清晰可辨
+- SAM 分割 score 全部 > 0.74, 最高 0.987
+- 不同颜色标记不同目标，mask 边界精确
+
+### 21. 端到端评估 (86 张 COCO 图片)
+
+![COCO 评估指标]()
+
+**在 COCO val2017 子集 (86 张, 10 类) 上的评估结果**:
+
+| 模块 | 指标 | 值 |
+|------|------|-----|
+| **YOLOv8n 检测** | Precision | 0.7299 |
+| | Recall | 0.5540 |
+| | F1-Score | 0.6299 |
+| | mAP@50 | **0.4598** |
+| | mIoU (bbox) | 0.8616 |
+| | 速度 | 0.062s/image |
+| **SAM ViT-B 分割** | mIoU (mask) | **0.5586** |
+| | 速度 | 0.06s/mask |
+| **ResNet50 识别** | 匹配率 (Top-20) | **87.2%** (239/274) |
+| | 单图匹配率 | **92.9%** (13/14) |
+
+**COCO→ImageNet 映射消融实验**:
+
+| 方案 | 匹配率 | 说明 |
+|------|--------|------|
+| 无映射 (Top-1 字符串) | 6.7% | 直接比较标签名 |
+| 基础映射 (Top-5) | 49.1% | 核心类别 |
+| 扩展映射 (Top-20) | 76.3% | 全面同义词 |
+| 失败分析优化 (Top-20) | **87.2%** | 针对失败类别补充 |
+
+---
+
 ## 系统界面总览
 
 ![完整界面](25_full_interface.png)

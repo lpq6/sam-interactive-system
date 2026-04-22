@@ -1,0 +1,456 @@
+{
+  "image": "/mnt/d/OpenClaw_Workspace_full/sam-interactive-system/test_images/coco_val_441247.jpg",
+  "total_detections": 14,
+  "matched": 13,
+  "match_rate": 0.9286,
+  "results": [
+    {
+      "class": "chair",
+      "conf": 0.882,
+      "resnet_top1": "muzzle",
+      "resnet_top5": [
+        [
+          "muzzle",
+          0.231
+        ],
+        [
+          "rocking chair",
+          0.182
+        ],
+        [
+          "folding chair",
+          0.061
+        ],
+        [
+          "football helmet",
+          0.057
+        ],
+        [
+          "hand blower",
+          0.039
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.182,
+      "sam_score": 0.914,
+      "sam_time": 0.064,
+      "resnet_time": 0.065
+    },
+    {
+      "class": "couch",
+      "conf": 0.788,
+      "resnet_top1": "quilt",
+      "resnet_top5": [
+        [
+          "quilt",
+          0.058
+        ],
+        [
+          "prayer rug",
+          0.042
+        ],
+        [
+          "Loafer",
+          0.041
+        ],
+        [
+          "clog",
+          0.031
+        ],
+        [
+          "paper towel",
+          0.028
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.025,
+      "sam_score": 0.944,
+      "sam_time": 0.053,
+      "resnet_time": 0.063
+    },
+    {
+      "class": "clock",
+      "conf": 0.715,
+      "resnet_top1": "analog clock",
+      "resnet_top5": [
+        [
+          "analog clock",
+          0.183
+        ],
+        [
+          "wall clock",
+          0.161
+        ],
+        [
+          "barometer",
+          0.102
+        ],
+        [
+          "loupe",
+          0.101
+        ],
+        [
+          "magnetic compass",
+          0.098
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.183,
+      "sam_score": 0.987,
+      "sam_time": 0.062,
+      "resnet_time": 0.059
+    },
+    {
+      "class": "couch",
+      "conf": 0.685,
+      "resnet_top1": "studio couch",
+      "resnet_top5": [
+        [
+          "studio couch",
+          0.856
+        ],
+        [
+          "quilt",
+          0.089
+        ],
+        [
+          "four-poster",
+          0.023
+        ],
+        [
+          "pillow",
+          0.009
+        ],
+        [
+          "rocking chair",
+          0.003
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.856,
+      "sam_score": 0.982,
+      "sam_time": 0.054,
+      "resnet_time": 0.058
+    },
+    {
+      "class": "person",
+      "conf": 0.672,
+      "resnet_top1": "Windsor tie",
+      "resnet_top5": [
+        [
+          "Windsor tie",
+          0.312
+        ],
+        [
+          "bassoon",
+          0.154
+        ],
+        [
+          "suit",
+          0.125
+        ],
+        [
+          "oboe",
+          0.061
+        ],
+        [
+          "trench coat",
+          0.055
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.055,
+      "sam_score": 0.922,
+      "sam_time": 0.065,
+      "resnet_time": 0.06
+    },
+    {
+      "class": "chair",
+      "conf": 0.535,
+      "resnet_top1": "four-poster",
+      "resnet_top5": [
+        [
+          "four-poster",
+          0.07
+        ],
+        [
+          "table lamp",
+          0.066
+        ],
+        [
+          "studio couch",
+          0.061
+        ],
+        [
+          "rocking chair",
+          0.042
+        ],
+        [
+          "potter's wheel",
+          0.042
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.042,
+      "sam_score": 0.914,
+      "sam_time": 0.059,
+      "resnet_time": 0.061
+    },
+    {
+      "class": "chair",
+      "conf": 0.46,
+      "resnet_top1": "cleaver",
+      "resnet_top5": [
+        [
+          "cleaver",
+          0.108
+        ],
+        [
+          "ballpoint",
+          0.083
+        ],
+        [
+          "can opener",
+          0.078
+        ],
+        [
+          "spatula",
+          0.061
+        ],
+        [
+          "revolver",
+          0.033
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.018,
+      "sam_score": 0.949,
+      "sam_time": 0.057,
+      "resnet_time": 0.059
+    },
+    {
+      "class": "person",
+      "conf": 0.383,
+      "resnet_top1": "rocking chair",
+      "resnet_top5": [
+        [
+          "rocking chair",
+          0.115
+        ],
+        [
+          "binder",
+          0.093
+        ],
+        [
+          "folding chair",
+          0.064
+        ],
+        [
+          "bannister",
+          0.058
+        ],
+        [
+          "cradle",
+          0.047
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.031,
+      "sam_score": 0.927,
+      "sam_time": 0.057,
+      "resnet_time": 0.06
+    },
+    {
+      "class": "chair",
+      "conf": 0.349,
+      "resnet_top1": "studio couch",
+      "resnet_top5": [
+        [
+          "studio couch",
+          0.763
+        ],
+        [
+          "quilt",
+          0.127
+        ],
+        [
+          "four-poster",
+          0.06
+        ],
+        [
+          "pillow",
+          0.006
+        ],
+        [
+          "pajama",
+          0.004
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.003,
+      "sam_score": 0.982,
+      "sam_time": 0.057,
+      "resnet_time": 0.06
+    },
+    {
+      "class": "person",
+      "conf": 0.321,
+      "resnet_top1": "steel drum",
+      "resnet_top5": [
+        [
+          "steel drum",
+          0.113
+        ],
+        [
+          "maillot tank suit",
+          0.089
+        ],
+        [
+          "jersey",
+          0.051
+        ],
+        [
+          "potter's wheel",
+          0.046
+        ],
+        [
+          "maraca",
+          0.037
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.113,
+      "sam_score": 0.936,
+      "sam_time": 0.057,
+      "resnet_time": 0.058
+    },
+    {
+      "class": "chair",
+      "conf": 0.317,
+      "resnet_top1": "tripod",
+      "resnet_top5": [
+        [
+          "tripod",
+          0.209
+        ],
+        [
+          "turnstile",
+          0.187
+        ],
+        [
+          "folding chair",
+          0.165
+        ],
+        [
+          "rocking chair",
+          0.098
+        ],
+        [
+          "fire screen",
+          0.04
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.165,
+      "sam_score": 0.744,
+      "sam_time": 0.058,
+      "resnet_time": 0.062
+    },
+    {
+      "class": "person",
+      "conf": 0.29,
+      "resnet_top1": "trench coat",
+      "resnet_top5": [
+        [
+          "trench coat",
+          0.35
+        ],
+        [
+          "Windsor tie",
+          0.067
+        ],
+        [
+          "swimming trunks",
+          0.056
+        ],
+        [
+          "jersey",
+          0.054
+        ],
+        [
+          "suit",
+          0.037
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.35,
+      "sam_score": 0.951,
+      "sam_time": 0.055,
+      "resnet_time": 0.059
+    },
+    {
+      "class": "backpack",
+      "conf": 0.261,
+      "resnet_top1": "bulletproof vest",
+      "resnet_top5": [
+        [
+          "bulletproof vest",
+          0.082
+        ],
+        [
+          "jersey",
+          0.069
+        ],
+        [
+          "abaya",
+          0.065
+        ],
+        [
+          "knee pad",
+          0.025
+        ],
+        [
+          "space bar",
+          0.024
+        ]
+      ],
+      "matched": false,
+      "match_prob": 0,
+      "sam_score": 0.945,
+      "sam_time": 0.058,
+      "resnet_time": 0.064
+    },
+    {
+      "class": "person",
+      "conf": 0.261,
+      "resnet_top1": "folding chair",
+      "resnet_top5": [
+        [
+          "folding chair",
+          0.342
+        ],
+        [
+          "rocking chair",
+          0.25
+        ],
+        [
+          "jinrikisha",
+          0.128
+        ],
+        [
+          "patio",
+          0.045
+        ],
+        [
+          "dining table",
+          0.008
+        ]
+      ],
+      "matched": true,
+      "match_prob": 0.006,
+      "sam_score": 0.891,
+      "sam_time": 0.064,
+      "resnet_time": 0.067
+    }
+  ]
+}
