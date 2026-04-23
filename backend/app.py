@@ -332,13 +332,19 @@ class ImageClassifier:
 classifier = ImageClassifier()
 
 # ── YOLO 目标检测模型（COCO 80 类） ──
+# 可选模型: "yolov8n.pt" (预训练) 或 "yolov8n_finetuned_v3.pt" (微调 v3)
+YOLO_MODEL_NAME = "yolov8n_finetuned_v3.pt"  # 默认使用微调模型
+
 class YOLODetector:
-    def __init__(self):
+    def __init__(self, model_name=None):
         self.model = None
         self.names = {}  # class_id -> class_name
         self.device = "cpu"
+        self.model_name = model_name or YOLO_MODEL_NAME
 
-    def load(self) -> bool:
+    def load(self, model_name=None) -> bool:
+        if model_name:
+            self.model_name = model_name
         try:
             # WSL + Windows Python 兼容性补丁
             import builtins
@@ -350,7 +356,7 @@ class YOLODetector:
             builtins.open = _patched_open
 
             from ultralytics import YOLO
-            model_path = Path(__file__).parent / "yolov8n.pt"
+            model_path = Path(__file__).parent / self.model_name
             if not model_path.exists():
                 print(f"[WARN] YOLO model not found: {model_path}")
                 return False
@@ -365,7 +371,7 @@ class YOLODetector:
             self.model = YOLO(model_path_str)
             self.names = self.model.names
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
-            print(f"[OK] YOLOv8n loaded on {self.device}, {len(self.names)} classes")
+            print(f"[OK] YOLO ({self.model_name}) loaded on {self.device}, {len(self.names)} classes")
             return True
         except ImportError:
             print("[WARN] ultralytics not installed, YOLO detection disabled")
@@ -399,6 +405,20 @@ class YOLODetector:
                         "class_id": cls_id,
                     })
         return detections
+
+    def switch_model(self, model_name: str) -> dict:
+        """切换 YOLO 模型"""
+        old_name = self.model_name
+        if not (Path(__file__).parent / model_name).exists():
+            return {"success": False, "error": f"Model not found: {model_name}", "current": old_name}
+        self.model = None
+        success = self.load(model_name)
+        return {
+            "success": success,
+            "old_model": old_name,
+            "new_model": self.model_name,
+            "classes": len(self.names),
+        }
 
 yolo = YOLODetector()
 
@@ -863,9 +883,19 @@ async def health():
         "model_loaded": sam.predictor is not None,
         "model_type": sam.model_type,
         "yolo_loaded": yolo.model is not None,
+        "yolo_model": yolo.model_name,
         "yolo_classes": len(yolo.names) if yolo.names else 0,
         "resnet_loaded": classifier.model is not None,
     }
+
+class YOLOSwitchRequest(BaseModel):
+    model: str  # "yolov8n.pt" (预训练) 或 "yolov8n_finetuned_v3.pt" (微调)
+
+@app.post("/api/yolo/switch")
+async def switch_yolo_model(req: YOLOSwitchRequest):
+    """切换 YOLO 模型（预训练 vs 微调）"""
+    result = yolo.switch_model(req.model)
+    return result
 
 @app.get("/api/models")
 async def list_models():
