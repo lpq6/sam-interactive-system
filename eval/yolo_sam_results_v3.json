@@ -1,0 +1,490 @@
+{
+  "pipeline": "YOLOv8n + SAM ViT-B + ResNet50",
+  "dataset": "COCO val2017 (86 images, 10 classes)",
+  "classes": [
+    "person",
+    "car",
+    "dog",
+    "cat",
+    "bird",
+    "bottle",
+    "chair",
+    "couch",
+    "dining table",
+    "tv"
+  ],
+  "yolo_detection": {
+    "TP": 200,
+    "FP": 74,
+    "FN": 161,
+    "precision": 0.7299,
+    "recall": 0.554,
+    "f1": 0.6299,
+    "mAP@50": 0.4598,
+    "mIoU_bbox": 0.8616,
+    "speed_s_per_img": 0.062
+  },
+  "sam_segmentation": {
+    "mIoU_mask": 0.5586,
+    "avg_time_s": 0.06,
+    "total_masks": 274
+  },
+  "resnet_recognition": {
+    "match_count": 239,
+    "match_total": 274,
+    "match_rate": 0.8723,
+    "avg_time_s": 0.066,
+    "sample_preds": [
+      {
+        "yolo_class": "car",
+        "resnet_top5": [
+          [
+            "grille",
+            0.139
+          ],
+          [
+            "car wheel",
+            0.117
+          ],
+          [
+            "sports car",
+            0.088
+          ],
+          [
+            "convertible",
+            0.078
+          ],
+          [
+            "racer",
+            0.075
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.139,
+        "sam_iou": 0.675,
+        "sam_time": 0.067,
+        "resnet_time": 0.087
+      },
+      {
+        "yolo_class": "tv",
+        "resnet_top5": [
+          [
+            "screen",
+            0.358
+          ],
+          [
+            "television",
+            0.25
+          ],
+          [
+            "monitor",
+            0.081
+          ],
+          [
+            "desktop computer",
+            0.042
+          ],
+          [
+            "web site",
+            0.033
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.358,
+        "sam_iou": 0.871,
+        "sam_time": 0.067,
+        "resnet_time": 0.068
+      },
+      {
+        "yolo_class": "person",
+        "resnet_top5": [
+          [
+            "stethoscope",
+            0.523
+          ],
+          [
+            "apron",
+            0.157
+          ],
+          [
+            "potter's wheel",
+            0.025
+          ],
+          [
+            "pajama",
+            0.022
+          ],
+          [
+            "marimba",
+            0.02
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.157,
+        "sam_iou": 0.537,
+        "sam_time": 0.059,
+        "resnet_time": 0.063
+      },
+      {
+        "yolo_class": "dining table",
+        "resnet_top5": [
+          [
+            "bakery",
+            0.344
+          ],
+          [
+            "jigsaw puzzle",
+            0.164
+          ],
+          [
+            "quilt",
+            0.109
+          ],
+          [
+            "cheeseburger",
+            0.058
+          ],
+          [
+            "pizza",
+            0.04
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.025,
+        "sam_iou": 0.115,
+        "sam_time": 0.063,
+        "resnet_time": 0.071
+      },
+      {
+        "yolo_class": "chair",
+        "resnet_top5": [
+          [
+            "cradle",
+            0.495
+          ],
+          [
+            "crib",
+            0.127
+          ],
+          [
+            "rocking chair",
+            0.098
+          ],
+          [
+            "harp",
+            0.061
+          ],
+          [
+            "folding chair",
+            0.024
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.495,
+        "sam_iou": 0.308,
+        "sam_time": 0.067,
+        "resnet_time": 0.069
+      },
+      {
+        "yolo_class": "couch",
+        "resnet_top5": [
+          [
+            "studio couch",
+            0.298
+          ],
+          [
+            "quilt",
+            0.065
+          ],
+          [
+            "pillow",
+            0.03
+          ],
+          [
+            "home theater",
+            0.024
+          ],
+          [
+            "four-poster",
+            0.023
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.298,
+        "sam_iou": 0.673,
+        "sam_time": 0.069,
+        "resnet_time": 0.068
+      },
+      {
+        "yolo_class": "chair",
+        "resnet_top5": [
+          [
+            "folding chair",
+            0.151
+          ],
+          [
+            "plate rack",
+            0.131
+          ],
+          [
+            "rocking chair",
+            0.127
+          ],
+          [
+            "chime",
+            0.065
+          ],
+          [
+            "radiator",
+            0.063
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.151,
+        "sam_iou": 0.59,
+        "sam_time": 0.061,
+        "resnet_time": 0.064
+      },
+      {
+        "yolo_class": "chair",
+        "resnet_top5": [
+          [
+            "space heater",
+            0.416
+          ],
+          [
+            "radiator",
+            0.054
+          ],
+          [
+            "grille",
+            0.041
+          ],
+          [
+            "projector",
+            0.039
+          ],
+          [
+            "fire screen",
+            0.038
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.005,
+        "sam_iou": 0.44,
+        "sam_time": 0.059,
+        "resnet_time": 0.066
+      },
+      {
+        "yolo_class": "cat",
+        "resnet_top5": [
+          [
+            "tiger cat",
+            0.128
+          ],
+          [
+            "Cardigan",
+            0.072
+          ],
+          [
+            "Egyptian cat",
+            0.062
+          ],
+          [
+            "tabby",
+            0.058
+          ],
+          [
+            "dhole",
+            0.044
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.128,
+        "sam_iou": 0.639,
+        "sam_time": 0.065,
+        "resnet_time": 0.068
+      },
+      {
+        "yolo_class": "car",
+        "resnet_top5": [
+          [
+            "limousine",
+            0.406
+          ],
+          [
+            "car mirror",
+            0.12
+          ],
+          [
+            "minivan",
+            0.118
+          ],
+          [
+            "grille",
+            0.073
+          ],
+          [
+            "beach wagon",
+            0.072
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.406,
+        "sam_iou": 0.837,
+        "sam_time": 0.066,
+        "resnet_time": 0.074
+      },
+      {
+        "yolo_class": "car",
+        "resnet_top5": [
+          [
+            "fur coat",
+            0.29
+          ],
+          [
+            "car mirror",
+            0.068
+          ],
+          [
+            "minivan",
+            0.062
+          ],
+          [
+            "printer",
+            0.04
+          ],
+          [
+            "sliding door",
+            0.036
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.068,
+        "sam_iou": 0.723,
+        "sam_time": 0.062,
+        "resnet_time": 0.068
+      },
+      {
+        "yolo_class": "car",
+        "resnet_top5": [
+          [
+            "bullet train",
+            0.252
+          ],
+          [
+            "car mirror",
+            0.063
+          ],
+          [
+            "limousine",
+            0.059
+          ],
+          [
+            "paintbrush",
+            0.034
+          ],
+          [
+            "grille",
+            0.032
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.063,
+        "sam_iou": 0.278,
+        "sam_time": 0.069,
+        "resnet_time": 0.071
+      },
+      {
+        "yolo_class": "cat",
+        "resnet_top5": [
+          [
+            "plastic bag",
+            0.265
+          ],
+          [
+            "tabby",
+            0.108
+          ],
+          [
+            "Egyptian cat",
+            0.055
+          ],
+          [
+            "tiger cat",
+            0.049
+          ],
+          [
+            "shopping basket",
+            0.018
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.108,
+        "sam_iou": 0.604,
+        "sam_time": 0.066,
+        "resnet_time": 0.069
+      },
+      {
+        "yolo_class": "dining table",
+        "resnet_top5": [
+          [
+            "ping-pong ball",
+            0.147
+          ],
+          [
+            "frying pan",
+            0.071
+          ],
+          [
+            "spaghetti squash",
+            0.047
+          ],
+          [
+            "rock beauty",
+            0.03
+          ],
+          [
+            "spatula",
+            0.029
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.071,
+        "sam_iou": 0.394,
+        "sam_time": 0.066,
+        "resnet_time": 0.075
+      },
+      {
+        "yolo_class": "person",
+        "resnet_top5": [
+          [
+            "Kerry blue terrier",
+            0.396
+          ],
+          [
+            "curly-coated retriever",
+            0.094
+          ],
+          [
+            "fox squirrel",
+            0.069
+          ],
+          [
+            "affenpinscher",
+            0.039
+          ],
+          [
+            "Irish water spaniel",
+            0.02
+          ]
+        ],
+        "matched": true,
+        "match_prob": 0.009,
+        "sam_iou": 0.462,
+        "sam_time": 0.07,
+        "resnet_time": 0.083
+      }
+    ]
+  }
+}
