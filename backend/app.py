@@ -333,7 +333,7 @@ classifier = ImageClassifier()
 
 # ── YOLO 目标检测模型（COCO 80 类） ──
 # 可选模型: "yolov8n.pt" (预训练) 或 "yolov8n_finetuned_v3.pt" (微调 v3)
-YOLO_MODEL_NAME = "yolov8n_finetuned_v3.pt"  # 默认使用微调模型
+YOLO_MODEL_NAME = "yolov8n.pt"  # 默认使用预训练模型（COCO 80 类）
 
 class YOLODetector:
     def __init__(self, model_name=None):
