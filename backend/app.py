@@ -69,13 +69,21 @@ COCO_TO_IMAGENET = {
     "airplane": ["airplane","plane","airliner","warplane","jet","wing"],
     "bus": ["bus","trolleybus","school bus","minibus","double decker"],
     "train": ["train","locomotive","freight car","passenger car","electric locomotive"],
-    "truck": ["truck","fire engine","garbage truck","pickup","tow truck","semi","van"],
+    "truck": ["truck","fire engine","garbage truck","pickup","tow truck","semi","van",
+              "delivery truck","dump truck","tank truck","flatbed truck","lorry",
+              "moving truck","cement truck","car carrier"],
     "boat": ["boat","sailboat","canoe","speedboat","yacht","lifeboat","ship","liner"],
-    "traffic light": ["traffic light","streetlight","stoplight"],
-    "fire hydrant": ["fire hydrant","hydrant"],
-    "stop sign": ["stop sign"],
-    "parking meter": ["parking meter","meter"],
-    "bench": ["bench","park bench"],
+    "traffic light": ["traffic light","streetlight","stoplight","signal light",
+                      "traffic signal","semaphore","red light","green light",
+                      "stop light","lamp post"],
+    "fire hydrant": ["fire hydrant","hydrant","fire plug","water hydrant",
+                     "standpipe","hose bib"],
+    "stop sign": ["stop sign","octagonal sign","red sign","road sign",
+                  "traffic sign","stop board"],
+    "parking meter": ["parking meter","meter","parking machine","pay station",
+                      "parking ticket machine","coin meter","meter box"],
+    "bench": ["bench","park bench","garden bench","parking bench","stone bench",
+              "wooden bench","long bench","bank","settee","lounger"],
     "bird": ["bird","robin","jay","magpie","hummingbird","peacock","owl",
              "parrot","flamingo","cock","hen","ostrich","black swan","bulbul",
              "coucal","bee eater","hornbill","jacamar","drake","goose","coua"],
@@ -94,11 +102,16 @@ COCO_TO_IMAGENET = {
     "bear": ["bear","brown bear","polar bear","grizzly"],
     "zebra": ["zebra"],
     "giraffe": ["giraffe"],
-    "backpack": ["backpack","knapsack","rucksack"],
-    "umbrella": ["umbrella"],
-    "handbag": ["handbag","purse","pouch"],
-    "tie": ["tie","bow tie","necktie"],
-    "suitcase": ["suitcase","luggage","trunk"],
+    "backpack": ["backpack","knapsack","rucksack","haversack","bookbag",
+                 "daypack","packsack","kitbag"],
+    "umbrella": ["umbrella","parasol","sunshade","rain umbrella","golf umbrella",
+                 "beach umbrella","brolly"],
+    "handbag": ["handbag","purse","pouch","clutch bag","tote bag","shoulder bag",
+                "satchel","bag","reticule","evening bag","crossbody bag"],
+    "tie": ["tie","bow tie","necktie","cravat","bolo tie","string tie",
+            "ascot tie","four-in-hand"],
+    "suitcase": ["suitcase","luggage","trunk","travel case","baggage",
+                 "travel bag","briefcase","valise","portmanteau"],
     "frisbee": ["frisbee"],
     "skis": ["skis","ski"],
     "snowboard": ["snowboard"],
@@ -113,9 +126,11 @@ COCO_TO_IMAGENET = {
     "bottle": ["bottle","wine bottle","water bottle","beer bottle","pop bottle","vial",
                "pitcher","carafe","flask","thermos","jug","coffee mug","cup",
                "measuring cup","pill bottle","whiskey jug","canister","tin can","barrel","urn"],
-    "wine glass": ["wine glass","goblet"],
+    "wine glass": ["wine glass","goblet","champagne flute","claret glass",
+                   "liqueur glass","sherry glass","snifter","port glass","tulip glass"],
     "cup": ["cup","coffee mug","teacup","mug","measuring cup"],
-    "fork": ["fork"],
+    "fork": ["fork","dinner fork","salad fork","dessert fork","pitchfork",
+             "table fork","carving fork","spork"],
     "knife": ["knife","cleaver","butcher knife","letter opener"],
     "spoon": ["spoon","wooden spoon","ladle"],
     "bowl": ["bowl","mixing bowl","soup bowl"],
@@ -133,7 +148,9 @@ COCO_TO_IMAGENET = {
               "folding chair","cradle","crib","high chair","barber chair","stool"],
     "couch": ["couch","sofa","loveseat","studio couch","davenport",
               "daybed","chaise longue","settee"],
-    "potted plant": ["potted plant","plant","flowerpot","vase"],
+    "potted plant": ["potted plant","plant","flowerpot","vase","planter",
+                     "indoor plant","houseplant","flower pot","potted flower",
+                     "green plant","fern","succulent"],
     "bed": ["bed","bunk bed","waterbed","crib","cot"],
     "dining table": ["dining table","table","ping-pong table","pool table","desk",
                      "altar","plate","tray","frying pan","stove","waffle iron",
@@ -142,12 +159,17 @@ COCO_TO_IMAGENET = {
     "tv": ["tv","monitor","screen","television","lcd screen","desktop computer"],
     "laptop": ["laptop","notebook","computer"],
     "mouse": ["mouse","computer mouse","trackball"],
-    "remote": ["remote","remote control","tv remote"],
+    "remote": ["remote","remote control","tv remote","clicker","controller",
+               "television remote","channel changer","zapper"],
     "keyboard": ["keyboard","computer keyboard"],
-    "cell phone": ["cell phone","mobile phone","phone","smartphone","dial telephone"],
-    "microwave": ["microwave","microwave oven"],
+    "cell phone": ["cell phone","mobile phone","phone","smartphone","dial telephone",
+                   "iphone","android phone","cellular telephone","hand phone",
+                   "mobile device","handset","flip phone"],
+    "microwave": ["microwave","microwave oven","countertop microwave",
+                  "built-in microwave","oven","convection microwave"],
     "oven": ["oven","stove","gas oven","electric oven"],
-    "toaster": ["toaster"],
+    "toaster": ["toaster","toaster oven","bread toaster","pop-up toaster",
+                "conveyor toaster","countertop oven"],
     "sink": ["sink","washbasin","basin"],
     "refrigerator": ["refrigerator","fridge","icebox"],
     "book": ["book","notebook","hardback","paperback"],
@@ -455,7 +477,7 @@ def yolo_sam_detect(img: np.ndarray, conf_thresh: float = 0.25, max_det: int = 3
         if classifier.model:
             try:
                 crop_pil = crop_object_with_mask(img, mask, margin=10)
-                result = classifier.classify(crop_pil, top_k=20)
+                result = classifier.classify(crop_pil, top_k=50)
                 if result:
                     top_labels = [r["label"] for r in result[:5]]
                     top_probs = [r["prob"] for r in result[:5]]
@@ -1596,7 +1618,7 @@ async def recognize_object(image_id: str = None, file: UploadFile = None):
 
                     # mask 裁剪 + ResNet 分类 (Top-20)
                     crop_pil = crop_object_with_mask(img, mask, margin=10)
-                    resnet_result = classifier.classify(crop_pil, top_k=20)
+                    resnet_result = classifier.classify(crop_pil, top_k=50)
                     if not resnet_result:
                         continue
 
@@ -1856,7 +1878,7 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                 if classifier.model:
                     try:
                         crop_pil = crop_object_with_mask(img, mask, margin=10)
-                        result = classifier.classify(crop_pil, top_k=20)
+                        result = classifier.classify(crop_pil, top_k=50)
                         if result:
                             resnet_top5 = [{"label": r["label"], "prob": round(r["prob"], 3)} for r in result[:5]]
                             is_match, match_prob, match_label = match_coco_class(
