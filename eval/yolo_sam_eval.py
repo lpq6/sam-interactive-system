@@ -6,9 +6,14 @@ import json, os, sys, time
 import numpy as np
 from PIL import Image
 
-IMG_DIR = '/mnt/d/OpenClaw_Workspace_full/coco_eval/images'
-ANN_FILE = '/mnt/d/OpenClaw_Workspace_full/coco_eval/annotations/instances_val2017.json'
-RESULTS_FILE = '/mnt/d/OpenClaw_Workspace_full/coco_eval/yolo_sam_results_v4.json'
+# 自动检测路径（兼容 Windows 和 WSL）
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_BASE_DIR = os.path.dirname(_SCRIPT_DIR)  # OpenClaw_Workspace_full
+_BACKEND_DIR = os.path.join(_BASE_DIR, 'sam-interactive-system', 'backend')
+
+IMG_DIR = os.path.join(_SCRIPT_DIR, 'images')
+ANN_FILE = os.path.join(_SCRIPT_DIR, 'annotations', 'instances_val2017.json')
+RESULTS_FILE = os.path.join(_SCRIPT_DIR, 'yolo_sam_results_v4.json')
 
 # ── 全面 COCO → ImageNet 同义词映射 (10 目标类 + 常见检测类) ──
 COCO_TO_IMAGENET = {
@@ -206,13 +211,13 @@ yolo_to_coco = {
 }
 
 import torch
-sys.path.insert(0, '/mnt/d/OpenClaw_Workspace_full/sam-interactive-system/backend')
+sys.path.insert(0, _BACKEND_DIR)
 from segment_anything import sam_model_registry, SamPredictor
 import torchvision.transforms as transforms
 import torchvision.models as models
 from torchvision.models import ResNet50_Weights
 
-SAM_CKPT = '/mnt/d/OpenClaw_Workspace_full/sam-interactive-system/backend/models/sam_vit_b_01ec64.pth'
+SAM_CKPT = os.path.join(_BACKEND_DIR, 'models', 'sam_vit_b_01ec64.pth')
 device = 'cpu'
 
 print('加载 SAM ViT-B...')
