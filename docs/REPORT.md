@@ -23,7 +23,7 @@
 ### 1.3 主要贡献
 
 - 设计并实现了 **YOLOv8n + SAM ViT-B + ResNet50** 三阶段端到端流水线，推理速度 ~0.18s/object
-- 提出 **COCO→ImageNet 类别映射方案**（覆盖 80 类 + 1500+ 同义词），识别率从 6.7% 提升至 87.2%
+- 提出 **COCO→ImageNet 类别映射方案**（覆盖 80 类 + 1500+ 同义词），识别率从 6.7% 提升至 **95.3%**
 - 提出 **SAM mask 精修方案**（连通区域过滤 + 边缘腐蚀 + 背景白底化），提取精度显著提升
 - 提供完整的 Web 交互界面（React + FastAPI），支持 9 大功能模块
 - 在 COCO val2017 上进行了完整评估
@@ -462,7 +462,7 @@ img.src = `data:image/png;base64,${d.mask}`
 
 **问题**: COCO 数据集提供 80 个粗粒度类别（如 "car"），而 ResNet50 使用 ImageNet 1000 个细粒度类别（如 "limousine"、"sports car"、"minivan"）。直接字符串匹配命中率仅 6.7%。
 
-**解决方案**: 构建覆盖 COCO 全部 80 类的同义词映射表，总计约 1500 个同义词。
+**解决方案**: 构建覆盖 COCO 全部 80 类的同义词映射表，总计约 1700 个同义词。
 
 ```python
 COCO_TO_IMAGENET = {
@@ -489,13 +489,15 @@ def match_coco_class(yolo_class, top_labels, top_probs):
     return False, 0.0, ""
 ```
 
-**消融实验** (COCO 94 张图):
+**消融实验** (COCO 86 张图, 275 个物体):
+
 | 方案 | 匹配率 | 说明 |
 |------|--------|------|
 | 无映射 (直接字符串) | 6.7% | "car" vs "limousine" → 不匹配 |
-| Top-5 匹配 | 49.1% | ResNet Top-5 可能包含 ImageNet 细粒度标签 |
+| Top-5 + 基础映射 | 49.1% | 搜索范围小 |
 | Top-20 + 基础映射 | 76.3% | 扩大搜索范围 |
-| Top-20 + 完整映射 | **87.2%** | 针对失败类别补充同义词 |
+| Top-20 + 完整映射 | 87.2% | 补充同义词 |
+| **Top-50 + 扩展映射** | **95.3%** | **当前版本，16 类同义词扩展** |
 
 ### 6.2 Mask 白底化（自定义改进）
 
@@ -542,7 +544,7 @@ Precision 提升 83.9%，证明过滤低频类别可显著减少误检。
   │              crop_object_with_mask() + 白底化
   │                      │
   │                      ▼
-  │              ResNet50 分类 (Top-20)
+  │              ResNet50 分类 (Top-50)
   │                      │
   │                      ▼
   │              match_coco_class() COCO→ImageNet 映射
@@ -585,14 +587,15 @@ self.model.fc = nn.Linear(2048, num_classes)  # 替换为新的分类头
 
 | 项目 | 配置 |
 |------|------|
-| 数据集 | COCO val2017 (94 张子集, 10 目标类) |
+| 数据集 | COCO val2017 (86 张子集, 10 目标类) |
 | 目标类别 | person, car, dog, cat, bird, bottle, chair, couch, dining table, tv |
 | 检测模型 | YOLOv8n (nano, 3.2M 参数) |
 | 分割模型 | SAM ViT-B (91M 参数) |
-| 识别模型 | ResNet50 (ImageNet 1K) |
+| 识别模型 | ResNet50 (ImageNet 1K) + COCO→ImageNet 映射 (1700+ 同义词) |
+| ResNet Top-K | 50 |
 | GPU | NVIDIA RTX 3060 Laptop, 6GB, CUDA 12.0 |
 | IoU 阈值 | 0.5 |
-| 评估指标 | Precision, Recall, F1, mAP@50, mIoU, Top-1/5, 匹配率 |
+| 评估指标 | Precision, Recall, F1, mAP@50, mIoU, 匹配率 |
 
 ### 7.2 端到端评估结果
 
@@ -600,20 +603,20 @@ self.model.fc = nn.Linear(2048, num_classes)  # 替换为新的分类头
 
 | 指标 | 值 |
 |------|-----|
-| Precision | 0.7299 |
+| Precision | 0.7273 |
 | Recall | 0.5540 |
-| F1-Score | 0.6299 |
-| mAP@50 | **0.4598** |
-| mIoU (bbox) | 0.8616 |
-| 速度 | 0.062s/image |
+| F1-Score | 0.6289 |
+| mAP@50 | **0.4587** |
+| mIoU (bbox) | 0.8615 |
+| 速度 | 0.061s/image |
 
 #### SAM ViT-B 图像分割
 
 | 指标 | 值 |
 |------|-----|
-| mIoU (mask, GPU) | **0.5586** |
-| 平均速度 | 0.06s/mask |
-| 总 mask 数 | 274 |
+| mIoU (mask, GPU) | **0.5594** |
+| 平均速度 | 0.21s/mask |
+| 总 mask 数 | 275 |
 
 **注意**: 之前 CPU 后端 SAM 未正常工作（mIoU 仅 0.079），GPU CUDA 后才是真实性能。
 
@@ -622,7 +625,7 @@ self.model.fc = nn.Linear(2048, num_classes)  # 替换为新的分类头
 | 评估方式 | Top-1 | Top-5 | 匹配率 |
 |----------|-------|-------|--------|
 | 全图分类 (94 张) | 9.6% | 16.0% | — |
-| YOLO+SAM+映射 (86 张) | — | — | **87.2%** |
+| YOLO+SAM+映射 (86 张) | — | — | **95.3%** (262/275) |
 | 单张丰富场景 | — | — | **92.9%** (13/14) |
 
 全图分类准确率低是因为整张图包含多个物体和大量背景；YOLO+SAM 裁剪后单物体识别准确率大幅提升。
@@ -693,7 +696,7 @@ async def extract_all_objects(image_id: str, min_area=500, min_confidence=0.3):
 
         # === ResNet 识别 ===
         crop_pil = crop_object_with_mask(img, refined_mask)   # 4. 白底裁剪
-        result = classifier.classify(crop_pil, top_k=20)     # 5. ResNet Top-20
+        result = classifier.classify(crop_pil, top_k=50)     # 5. ResNet Top-50
 
         # === COCO→ImageNet 映射 ===
         is_match, prob, label = match_coco_class(             # 6. 同义词匹配
@@ -742,7 +745,7 @@ async def extract_all_objects(image_id: str, min_area=500, min_confidence=0.3):
 ### 9.1 技术成果
 
 1. **端到端流水线**: YOLOv8n + SAM ViT-B + ResNet50 三阶段联合，推理速度 ~0.18s/object
-2. **COCO→ImageNet 映射**: 解决粗粒度→细粒度标签对齐，识别率从 6.7% → 87.2%
+2. **COCO→ImageNet 映射**: 解决粗粒度→细粒度标签对齐，识别率从 6.7% → **95.3%**
 3. **Mask 精修方案**: 连通区域过滤 + 边缘腐蚀 + 白底化，提取精度显著提升
 4. **数据增强管道**: 7 种增强方法，支持小样本自定义训练
 5. **完整 Web 界面**: 9 大功能模块，React + FastAPI 架构
