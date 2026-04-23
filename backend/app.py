@@ -54,6 +54,123 @@ class AutoSegmentRequest(BaseModel):
     min_mask_region_area: int = 300
     max_objects: int = 15
 
+# ── COCO → ImageNet 同义词映射（用于 ResNet 分类匹配）──
+COCO_TO_IMAGENET = {
+    "person": ["person","man","woman","boy","girl","human","bridegroom","groom","bather",
+               "scuba diver","parachutist","backpacker","skier","swimmer","cowboy",
+               "academic gown","apron","bib","poncho","raincoat","jersey","sweatshirt",
+               "wig","abaya","kimono","miniskirt","trench coat","crash helmet","hard hat",
+               "jean","cardigan","vestment","diaper","sarong","maillot","rapper"],
+    "bicycle": ["bicycle","mountain bike","bike","unicycle","tandem bicycle","cycle"],
+    "car": ["car","limousine","sports car","minivan","jeep","cab","convertible",
+            "coupe","hatchback","sedan","taxi","police car","race car","beach wagon",
+            "car wheel","grille","racer","streetcar"],
+    "motorcycle": ["motorcycle","motorbike","moped","scooter"],
+    "airplane": ["airplane","plane","airliner","warplane","jet","wing"],
+    "bus": ["bus","trolleybus","school bus","minibus","double decker"],
+    "train": ["train","locomotive","freight car","passenger car","electric locomotive"],
+    "truck": ["truck","fire engine","garbage truck","pickup","tow truck","semi","van"],
+    "boat": ["boat","sailboat","canoe","speedboat","yacht","lifeboat","ship","liner"],
+    "traffic light": ["traffic light","streetlight","stoplight"],
+    "fire hydrant": ["fire hydrant","hydrant"],
+    "stop sign": ["stop sign"],
+    "parking meter": ["parking meter","meter"],
+    "bench": ["bench","park bench"],
+    "bird": ["bird","robin","jay","magpie","hummingbird","peacock","owl",
+             "parrot","flamingo","cock","hen","ostrich","black swan","bulbul",
+             "coucal","bee eater","hornbill","jacamar","drake","goose","coua"],
+    "cat": ["cat","tabby","siamese cat","persian cat","egyptian cat","tiger cat",
+            "persian","lynx","cougar","leopard","jaguar"],
+    "dog": ["dog","golden retriever","labrador","german shepherd","poodle","bulldog",
+            "beagle","chihuahua","husky","dalmatian","collie","pug","corgi",
+            "rottweiler","doberman","boxer","shih tzu","malamute","pomeranian",
+            "chow","papillon","redbone","basset","bloodhound",
+            "giant schnauzer","standard schnauzer","miniature schnauzer",
+            "Irish setter","saluki","whippet","greyhound","cocker spaniel"],
+    "horse": ["horse","sorrel","stallion","mare","mustang","thoroughbred"],
+    "sheep": ["sheep","ram","ewe"],
+    "cow": ["cow","ox","bull","water buffalo","bison"],
+    "elephant": ["elephant","african elephant","indian elephant"],
+    "bear": ["bear","brown bear","polar bear","grizzly"],
+    "zebra": ["zebra"],
+    "giraffe": ["giraffe"],
+    "backpack": ["backpack","knapsack","rucksack"],
+    "umbrella": ["umbrella"],
+    "handbag": ["handbag","purse","pouch"],
+    "tie": ["tie","bow tie","necktie"],
+    "suitcase": ["suitcase","luggage","trunk"],
+    "frisbee": ["frisbee"],
+    "skis": ["skis","ski"],
+    "snowboard": ["snowboard"],
+    "sports ball": ["sports ball","football","basketball","tennis ball","baseball",
+                    "golf ball","volleyball","ping-pong ball"],
+    "kite": ["kite"],
+    "baseball bat": ["baseball bat","bat"],
+    "baseball glove": ["baseball glove","glove","mitt"],
+    "skateboard": ["skateboard"],
+    "surfboard": ["surfboard"],
+    "tennis racket": ["tennis racket","racket"],
+    "bottle": ["bottle","wine bottle","water bottle","beer bottle","pop bottle","vial",
+               "pitcher","carafe","flask","thermos","jug","coffee mug","cup",
+               "measuring cup","pill bottle","whiskey jug","canister","tin can","barrel","urn"],
+    "wine glass": ["wine glass","goblet"],
+    "cup": ["cup","coffee mug","teacup","mug","measuring cup"],
+    "fork": ["fork"],
+    "knife": ["knife","cleaver","butcher knife","letter opener"],
+    "spoon": ["spoon","wooden spoon","ladle"],
+    "bowl": ["bowl","mixing bowl","soup bowl"],
+    "banana": ["banana"],
+    "apple": ["apple","granny smith"],
+    "sandwich": ["sandwich","submarine","burger","hamburger","hotdog"],
+    "orange": ["orange"],
+    "broccoli": ["broccoli"],
+    "carrot": ["carrot"],
+    "hot dog": ["hot dog","hotdog","corn"],
+    "pizza": ["pizza"],
+    "donut": ["donut","doughnut"],
+    "cake": ["cake","chocolate cake","wedding cake","cheesecake","bakery"],
+    "chair": ["chair","armchair","rocking chair","wheelchair","throne","desk chair",
+              "folding chair","cradle","crib","high chair","barber chair","stool"],
+    "couch": ["couch","sofa","loveseat","studio couch","davenport",
+              "daybed","chaise longue","settee"],
+    "potted plant": ["potted plant","plant","flowerpot","vase"],
+    "bed": ["bed","bunk bed","waterbed","crib","cot"],
+    "dining table": ["dining table","table","ping-pong table","pool table","desk",
+                     "altar","plate","tray","frying pan","stove","waffle iron",
+                     "coffee table","end table","buffet","sideboard","counter"],
+    "toilet": ["toilet","toilet seat","bidet"],
+    "tv": ["tv","monitor","screen","television","lcd screen","desktop computer"],
+    "laptop": ["laptop","notebook","computer"],
+    "mouse": ["mouse","computer mouse","trackball"],
+    "remote": ["remote","remote control","tv remote"],
+    "keyboard": ["keyboard","computer keyboard"],
+    "cell phone": ["cell phone","mobile phone","phone","smartphone","dial telephone"],
+    "microwave": ["microwave","microwave oven"],
+    "oven": ["oven","stove","gas oven","electric oven"],
+    "toaster": ["toaster"],
+    "sink": ["sink","washbasin","basin"],
+    "refrigerator": ["refrigerator","fridge","icebox"],
+    "book": ["book","notebook","hardback","paperback"],
+    "clock": ["clock","alarm clock","wall clock","digital clock","stopwatch","analog clock"],
+    "vase": ["vase","flowerpot","pitcher"],
+    "scissors": ["scissors"],
+    "teddy bear": ["teddy bear","teddy"],
+    "hair drier": ["hair drier","hair dryer","blow dryer"],
+    "toothbrush": ["toothbrush"],
+}
+
+def match_coco_class(yolo_class: str, top_labels: list, top_probs: list):
+    """判断 ResNet Top-K 是否命中 COCO 类别的同义词集合"""
+    if yolo_class not in COCO_TO_IMAGENET:
+        return False, 0.0, ""
+    targets = [t.lower() for t in COCO_TO_IMAGENET[yolo_class]]
+    for label, prob in zip(top_labels, top_probs):
+        label_lower = label.lower().replace('_', ' ')
+        for target in targets:
+            if target in label_lower:
+                return True, prob, label
+    return False, 0.0, ""
+
 # ── SAM 预测器管理 ──
 class SAMPredictor:
     def __init__(self):
@@ -330,16 +447,44 @@ def yolo_sam_detect(img: np.ndarray, conf_thresh: float = 0.25, max_det: int = 3
         # 生成单个掩码的 base64
         single_mask_b64 = mask_to_base64(mask)
 
+        # ResNet 分类（mask 裁剪 + COCO→ImageNet 映射）
+        resnet_label = det["label"]  # 默认用 YOLO 标签
+        resnet_confidence = det["confidence"]
+        resnet_top5 = []
+        resnet_matched = False
+        if classifier.model:
+            try:
+                crop_pil = crop_object_with_mask(img, mask, margin=10)
+                result = classifier.classify(crop_pil, top_k=20)
+                if result:
+                    top_labels = [r["label"] for r in result[:5]]
+                    top_probs = [r["prob"] for r in result[:5]]
+                    resnet_top5 = list(zip(top_labels, top_probs))
+                    # 尝试 COCO→ImageNet 匹配
+                    is_match, match_prob, match_label = match_coco_class(
+                        det["label"], [r["label"] for r in result], [r["prob"] for r in result]
+                    )
+                    if is_match:
+                        resnet_matched = True
+                        resnet_label = match_label  # 用 ImageNet 细粒度标签
+                        resnet_confidence = match_prob
+            except Exception:
+                pass
+
         detections.append({
             "id": i + 1,
-            "label": det["label"],
-            "confidence": det["confidence"],  # YOLO 的置信度（COCO 类别，准确！）
+            "label": det["label"],           # YOLO 的 COCO 类别标签（主标签）
+            "resnet_label": resnet_label,     # ResNet 识别的 ImageNet 标签
+            "confidence": det["confidence"],  # YOLO 置信度
+            "resnet_confidence": round(float(resnet_confidence), 3),
+            "resnet_matched": resnet_matched, # COCO→ImageNet 映射是否命中
+            "resnet_top5": resnet_top5,
             "mask": single_mask_b64,
             "bbox": mask_bbox,
             "area": mask_area,
             "score": sam_score,
             "class_id": det["class_id"],
-            "source": "yolo+sam",
+            "source": "yolo+sam+resnet",
         })
 
     # 按置信度排序
@@ -358,7 +503,7 @@ def yolo_sam_detect(img: np.ndarray, conf_thresh: float = 0.25, max_det: int = 3
         "count": len(detections),
         "detections": detections,
         "overlay": overlay_b64,
-        "method": "yolo+sam",
+        "method": "yolo+sam+resnet",
     }
 
 # ── 图像工具 ──
@@ -1363,7 +1508,7 @@ def classify_region(mean_color, area, img_shape):
 
 @app.post("/api/recognize")
 async def recognize_object(image_id: str = None, file: UploadFile = None):
-    """识别 - 对分割区域进行识别"""
+    """识别 - YOLO检测 → SAM分割 → mask裁剪 → ResNet识别 + COCO→ImageNet映射"""
     if image_id:
         path = find_image(image_id)
         if not path:
@@ -1377,18 +1522,13 @@ async def recognize_object(image_id: str = None, file: UploadFile = None):
 
     h, w = img.shape[:2]
 
-    # 计算图像整体特征
+    # 场景分析（保留原有功能）
     mean_color = img.mean(axis=(0, 1))
     std_color = img.std(axis=(0, 1))
-
-    # 分析主要颜色
     dominant_colors = extract_dominant_colors(img)
-
-    # 图像属性
     brightness = float(mean_color.mean())
     contrast = float(std_color.mean())
 
-    # 简单场景判断
     if brightness > 180:
         scene = "明亮场景"
     elif brightness > 120:
@@ -1397,14 +1537,58 @@ async def recognize_object(image_id: str = None, file: UploadFile = None):
         scene = "较暗场景"
     else:
         scene = "暗光场景"
-
     if dominant_colors[0][1] > 0.4:
         scene += " / 单一主色调"
     else:
         scene += " / 多彩场景"
 
-    # 使用 ResNet 进行物体识别
-    classifications = classifier.classify(Image.fromarray(img), top_k=5)
+    # YOLO→SAM→mask裁剪→ResNet 流水线识别
+    object_results = []
+    if yolo.model and classifier.model:
+        try:
+            # YOLO 检测
+            yolo_dets = yolo.detect(img, conf_thresh=0.25, max_det=20)
+            if yolo_dets:
+                # SAM 分割
+                sam.set_image(img)
+                for det in yolo_dets:
+                    x1, y1, x2, y2 = det["bbox"]
+                    box_np = np.array([x1, y1, x2, y2])
+                    try:
+                        masks, scores = sam.predict_box(box_np)
+                        best_idx = int(np.argmax(scores))
+                        mask = masks[best_idx]
+                    except Exception:
+                        continue
+
+                    # mask 裁剪 + ResNet 分类 (Top-20)
+                    crop_pil = crop_object_with_mask(img, mask, margin=10)
+                    resnet_result = classifier.classify(crop_pil, top_k=20)
+                    if not resnet_result:
+                        continue
+
+                    top5 = [{"label": r["label"], "prob": round(r["prob"], 3)} for r in resnet_result[:5]]
+                    # COCO→ImageNet 映射匹配
+                    is_match, match_prob, match_label = match_coco_class(
+                        det["label"],
+                        [r["label"] for r in resnet_result],
+                        [r["prob"] for r in resnet_result]
+                    )
+
+                    object_results.append({
+                        "yolo_class": det["label"],
+                        "yolo_confidence": det["confidence"],
+                        "resnet_label": match_label if is_match else resnet_result[0]["label"],
+                        "resnet_confidence": round(float(match_prob if is_match else resnet_result[0]["prob"]), 3),
+                        "coco_matched": is_match,
+                        "top5": top5,
+                        "bbox": det["bbox"],
+                    })
+        except Exception as e:
+            object_results = [{"error": str(e)}]
+
+    # 兼容旧格式：全图分类
+    full_image_classifications = classifier.classify(Image.fromarray(img), top_k=5)
 
     return {
         "success": True,
@@ -1413,7 +1597,9 @@ async def recognize_object(image_id: str = None, file: UploadFile = None):
         "brightness": round(brightness, 1),
         "contrast": round(contrast, 1),
         "dominant_colors": [{"rgb": list(c), "ratio": round(r, 3)} for c, r in dominant_colors],
-        "classifications": classifications,  # 新增：ResNet 识别结果
+        "classifications": full_image_classifications,  # 兼容：全图分类
+        "objects": object_results,  # 新增：逐物体识别结果
+        "method": "yolo+sam+resnet" if object_results else "resnet-full",
     }
 
 
