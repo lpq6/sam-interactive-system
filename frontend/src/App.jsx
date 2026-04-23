@@ -1885,7 +1885,22 @@ export default function App() {
                       whiteSpace: 'nowrap'
                     }}>
                       {obj.label}
+                      {obj.resnet_matched && (
+                        <span style={{ color: '#22c55e' }}> ✓</span>
+                      )}
                     </div>
+                    {obj.resnet_matched && obj.resnet_label !== obj.label && (
+                      <div style={{
+                        fontSize: '0.55rem',
+                        textAlign: 'center',
+                        color: 'var(--text-muted)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {obj.resnet_label}
+                      </div>
+                    )}
                     <div style={{
                       fontSize: '0.6rem',
                       textAlign: 'center',

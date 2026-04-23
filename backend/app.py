@@ -1775,7 +1775,7 @@ async def extract_color_object(image_id: str, mask_base64: str = None, bbox: str
 @app.post("/api/extract/all")
 async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence: float = 0.3):
     """
-    批量提取彩色物体
+    批量提取彩色物体 — YOLO→SAM→mask裁剪→ResNet 流水线
     
     参数:
         image_id: 图片ID
@@ -1783,7 +1783,7 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
         min_confidence: 最低置信度阈值（默认0.3，即30%）
     
     返回:
-        置信度高于阈值的彩色物体列表
+        检测到的彩色物体列表（透明背景PNG）
     """
     path = find_image(image_id)
     if not path:
@@ -1791,39 +1791,117 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
     
     img = np.array(Image.open(path).convert("RGB"))
     h, w = img.shape[:2]
-    
-    # 不要这些泛化标签
-    generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
-    
+
+    # 优先使用 YOLO+SAM 流水线
+    if yolo.model:
+        yolo_dets = yolo.detect(img, conf_thresh=0.25, max_det=20)
+        if yolo_dets:
+            sam.set_image(img)
+            objects = []
+            for det in yolo_dets:
+                x1, y1, x2, y2 = det["bbox"]
+                box_np = np.array([x1, y1, x2, y2])
+                try:
+                    masks, scores = sam.predict_box(box_np)
+                    best_idx = int(np.argmax(scores))
+                    mask = masks[best_idx]
+                except Exception:
+                    continue
+
+                mask_area = int(mask.sum())
+                if mask_area < min_area:
+                    continue
+
+                ys, xs = np.where(mask)
+                bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
+
+                # ResNet 分类 + COCO 映射
+                resnet_label = det["label"]
+                resnet_confidence = det["confidence"]
+                resnet_matched = False
+                resnet_top5 = []
+                if classifier.model:
+                    try:
+                        crop_pil = crop_object_with_mask(img, mask, margin=10)
+                        result = classifier.classify(crop_pil, top_k=20)
+                        if result:
+                            resnet_top5 = [{"label": r["label"], "prob": round(r["prob"], 3)} for r in result[:5]]
+                            is_match, match_prob, match_label = match_coco_class(
+                                det["label"],
+                                [r["label"] for r in result],
+                                [r["prob"] for r in result]
+                            )
+                            if is_match:
+                                resnet_matched = True
+                                resnet_label = match_label
+                                resnet_confidence = match_prob
+                    except Exception:
+                        pass
+
+                # 提取彩色物体（平滑边缘，透明背景）
+                rgba = create_rgba_from_mask(img, mask, smooth=True, blur_radius=5)
+                y1m, y2m = ys.min(), ys.max()
+                x1m, x2m = xs.min(), xs.max()
+                cropped = rgba[y1m:y2m+1, x1m:x2m+1]
+
+                result_img = Image.fromarray(cropped, 'RGBA')
+                buffer = io.BytesIO()
+                result_img.save(buffer, format='PNG')
+                color_b64 = base64.b64encode(buffer.getvalue()).decode()
+
+                smooth_alpha = smooth_mask(mask, blur_radius=5, feather=True)
+                mask_img = Image.fromarray(smooth_alpha, 'L')
+                mask_buffer = io.BytesIO()
+                mask_img.save(mask_buffer, format='PNG')
+                mask_b64 = base64.b64encode(mask_buffer.getvalue()).decode()
+
+                objects.append({
+                    "id": len(objects) + 1,
+                    "label": det["label"],  # YOLO COCO 标签（主标签）
+                    "resnet_label": resnet_label,
+                    "confidence": round(float(det["confidence"]), 3),
+                    "resnet_confidence": round(float(resnet_confidence), 3),
+                    "resnet_matched": resnet_matched,
+                    "resnet_top5": resnet_top5,
+                    "score": round(float(scores[best_idx]), 3) if 'best_idx' in dir() else 0,
+                    "bbox": bbox,
+                    "area": mask_area,
+                    "color_image": color_b64,
+                    "mask": mask_b64,
+                    "source": "yolo+sam+resnet",
+                })
+
+            return {
+                "success": True,
+                "image_id": image_id,
+                "objects": objects,
+                "count": len(objects),
+                "method": "yolo+sam+resnet",
+            }
+
+    # Fallback: SAM 网格采样（无 YOLO 时）
     try:
         sam.set_image(img)
-        
-        # 网格采样点
+        generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
         step = max(w, h) // 20
         step = max(step, 40)
-        
         objects = []
         used_masks = []
-        
+
         for y in range(step//2, h, step):
             for x in range(step//2, w, step):
                 if len(objects) >= 20:
                     break
-                
                 try:
                     masks, scores, _ = sam.predictor.predict(
                         point_coords=np.array([[x, y]]),
                         point_labels=np.array([1]),
                         multimask_output=False
                     )
-                    
                     mask = masks[0]
                     area = mask.sum()
-                    
                     if area < min_area:
                         continue
-                    
-                    # 检查重复
                     is_dup = False
                     for used in used_masks:
                         if (mask & used).sum() / min(mask.sum(), used.sum()) > 0.5:
@@ -1831,14 +1909,9 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                             break
                     if is_dup:
                         continue
-                    
                     used_masks.append(mask)
-                    
-                    # 计算边界框
                     ys, xs = np.where(mask)
                     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
-                    
-                    # 用 ResNet 识别该区域（掩码裁剪 + top_k=5）
                     region_label = "未知"
                     region_prob = 0.0
                     if classifier.model:
@@ -1846,7 +1919,6 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                             crop_pil = crop_object_with_mask(img, mask, margin=10)
                             result = classifier.classify(crop_pil, top_k=5)
                             if result:
-                                # 遍历备选标签，找第一个通过阈值的
                                 for r in result:
                                     if r["prob"] >= min_confidence and r["label"] not in generic_labels:
                                         region_label = r["label"]
@@ -1854,31 +1926,21 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                                         break
                         except:
                             pass
-
-                    # 跳过低置信度和泛化标签的物体
                     if region_prob < min_confidence or region_label in generic_labels:
                         continue
-                    
-                    # 提取彩色物体（平滑边缘，透明背景）
                     rgba = create_rgba_from_mask(img, mask, smooth=True, blur_radius=5)
-                    
-                    y1, y2 = ys.min(), ys.max()
-                    x1, x2 = xs.min(), xs.max()
-                    cropped = rgba[y1:y2+1, x1:x2+1]
-                    
-                    # 转为base64
+                    y1m, y2m = ys.min(), ys.max()
+                    x1m, x2m = xs.min(), xs.max()
+                    cropped = rgba[y1m:y2m+1, x1m:x2m+1]
                     result_img = Image.fromarray(cropped, 'RGBA')
                     buffer = io.BytesIO()
                     result_img.save(buffer, format='PNG')
                     color_b64 = base64.b64encode(buffer.getvalue()).decode()
-                    
-                    # 生成平滑掩码base64
                     smooth_alpha = smooth_mask(mask, blur_radius=5, feather=True)
                     mask_img = Image.fromarray(smooth_alpha, 'L')
                     mask_buffer = io.BytesIO()
                     mask_img.save(mask_buffer, format='PNG')
                     mask_b64 = base64.b64encode(mask_buffer.getvalue()).decode()
-                    
                     objects.append({
                         "id": len(objects) + 1,
                         "label": region_label,
@@ -1888,21 +1950,19 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                         "area": int(area),
                         "color_image": color_b64,
                         "mask": mask_b64,
+                        "source": "grid+resnet",
                     })
-                    
                 except Exception:
                     continue
-            
-            if len(objects) >= 15:
-                break
-        
+                if len(objects) >= 15:
+                    break
         return {
             "success": True,
             "image_id": image_id,
             "objects": objects,
-            "count": len(objects)
+            "count": len(objects),
+            "method": "grid+resnet",
         }
-        
     except Exception as e:
         return {"success": False, "error": str(e)}
 
