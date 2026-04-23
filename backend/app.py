@@ -599,15 +599,12 @@ def smooth_mask(mask: np.ndarray, blur_radius: int = 3, feather: bool = True) ->
     
     mask_img = Image.fromarray(mask_uint8, 'L')
     
+    from PIL import ImageFilter
     if feather:
         # 羽化效果：先膨胀再模糊
-        from PIL import ImageFilter
-        # 轻微膨胀
         dilated = mask_img.filter(ImageFilter.MaxFilter(size=blur_radius * 2 + 1))
-        # 高斯模糊
         smoothed = dilated.filter(ImageFilter.GaussianBlur(radius=blur_radius))
     else:
-        # 仅高斯模糊
         smoothed = mask_img.filter(ImageFilter.GaussianBlur(radius=blur_radius))
     
     return np.array(smoothed)
