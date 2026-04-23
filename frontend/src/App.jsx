@@ -1626,6 +1626,11 @@ export default function App() {
                         background: `hsl(${d.id * 25}, 70%, 50%)`
                       }}></span>
                       {i === 0 ? '🏆' : ''} {d.label}
+                      {d.resnet_matched && (
+                        <span style={{ fontSize: '0.7rem', color: '#22c55e', marginLeft: '0.2rem' }}>
+                          ✓ {d.resnet_label}
+                        </span>
+                      )}
                     </span>
                     <span style={{ color: 'var(--text-muted)' }}>
                       {d.confidence ? `${(d.confidence * 100).toFixed(0)}%` : `${(d.score * 100).toFixed(0)}%`}
@@ -1711,10 +1716,49 @@ export default function App() {
             <div className="tool-section">
               <h3>🏷️ 图像识别</h3>
 
-              {/* 物体识别结果 */}
-              {recognizeResult.classifications && (
+              {/* 逐物体识别结果（YOLO+SAM+ResNet 流水线） */}
+              {recognizeResult.objects && recognizeResult.objects.length > 0 && (
                 <div style={{ marginBottom: '0.75rem' }}>
-                  <span className="metric-label">🎯 识别物体</span>
+                  <span className="metric-label">🎯 检测到 {recognizeResult.objects.length} 个物体</span>
+                  <div style={{ marginTop: '0.3rem' }}>
+                    {recognizeResult.objects.map((obj, i) => (
+                      <div key={i} style={{
+                        padding: '0.5rem 0', borderBottom: '1px solid var(--border)',
+                        fontSize: '0.85rem'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--primary)' }}>
+                            🏷️ {obj.yolo_class}
+                          </span>
+                          <span style={{
+                            background: obj.coco_matched ? 'rgba(34,197,94,0.2)' : 'rgba(99,102,241,0.15)',
+                            padding: '0.1rem 0.4rem', borderRadius: '4px', fontSize: '0.7rem',
+                            color: obj.coco_matched ? '#22c55e' : 'var(--text-muted)'
+                          }}>
+                            YOLO {(obj.yolo_confidence * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        {obj.resnet_label && obj.resnet_label !== obj.yolo_class && (
+                          <div style={{ marginTop: '0.2rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            🔍 ResNet: <strong>{obj.resnet_label}</strong> ({(obj.resnet_confidence * 100).toFixed(0)}%)
+                            {obj.coco_matched && ' ✓'}
+                          </div>
+                        )}
+                        {obj.top5 && obj.top5.length > 0 && (
+                          <div style={{ marginTop: '0.2rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                            Top-5: {obj.top5.map(t => `${t.label}(${(t.prob * 100).toFixed(0)}%)`).join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Fallback: 全图分类（当无逐物体结果时） */}
+              {(!recognizeResult.objects || recognizeResult.objects.length === 0) && recognizeResult.classifications && (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <span className="metric-label">🎯 全图分类</span>
                   <div style={{ marginTop: '0.3rem' }}>
                     {recognizeResult.classifications.map((c, i) => (
                       <div key={i} style={{
