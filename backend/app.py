@@ -543,6 +543,42 @@ def mask_to_base64(mask: np.ndarray) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
+def refine_mask(mask: np.ndarray, erode_px: int = 3) -> np.ndarray:
+    """
+    精修掩码：去噪 + 边缘腐蚀 + 保留最大连通区域
+
+    参数:
+        mask: 二值掩码 (bool)
+        erode_px: 腐蚀像素数（越大边缘越紧）
+
+    返回:
+        精修后的掩码 (bool)
+    """
+    from scipy.ndimage import label, binary_erosion
+
+    mask_uint8 = mask.astype(np.uint8)
+
+    # 1. 去除小连通区域（保留最大区域）
+    labeled, num_features = label(mask_uint8)
+    if num_features > 1:
+        largest = 0
+        largest_size = 0
+        for i in range(1, num_features + 1):
+            size = (labeled == i).sum()
+            if size > largest_size:
+                largest_size = size
+                largest = i
+        mask_uint8 = (labeled == largest).astype(np.uint8)
+
+    # 2. 边缘腐蚀（收缩边界，去掉多余像素）
+    if erode_px > 0:
+        from scipy.ndimage import binary_erosion as ero
+        struct = np.ones((erode_px, erode_px), dtype=bool)
+        mask_uint8 = ero(mask_uint8.astype(bool), structure=struct).astype(np.uint8)
+
+    return mask_uint8.astype(bool)
+
+
 def smooth_mask(mask: np.ndarray, blur_radius: int = 3, feather: bool = True) -> np.ndarray:
     """
     平滑掩码边缘
@@ -1838,8 +1874,12 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                     except Exception:
                         pass
 
-                # 提取彩色物体（平滑边缘，透明背景）
-                rgba = create_rgba_from_mask(img, mask, smooth=True, blur_radius=5)
+                # 提取彩色物体（精修掩码 + 平滑边缘，透明背景）
+                refined_mask = refine_mask(mask, erode_px=3)
+                rgba = create_rgba_from_mask(img, refined_mask, smooth=True, blur_radius=3)
+                ys, xs = np.where(refined_mask)
+                if len(ys) == 0:
+                    continue
                 y1m, y2m = ys.min(), ys.max()
                 x1m, x2m = xs.min(), xs.max()
                 cropped = rgba[y1m:y2m+1, x1m:x2m+1]
@@ -1849,7 +1889,7 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                 result_img.save(buffer, format='PNG')
                 color_b64 = base64.b64encode(buffer.getvalue()).decode()
 
-                smooth_alpha = smooth_mask(mask, blur_radius=5, feather=True)
+                smooth_alpha = smooth_mask(refined_mask, blur_radius=3, feather=False)
                 mask_img = Image.fromarray(smooth_alpha, 'L')
                 mask_buffer = io.BytesIO()
                 mask_img.save(mask_buffer, format='PNG')
@@ -1928,7 +1968,11 @@ async def extract_all_objects(image_id: str, min_area: int = 500, min_confidence
                             pass
                     if region_prob < min_confidence or region_label in generic_labels:
                         continue
-                    rgba = create_rgba_from_mask(img, mask, smooth=True, blur_radius=5)
+                    refined_mask = refine_mask(mask, erode_px=2)
+                    rgba = create_rgba_from_mask(img, refined_mask, smooth=True, blur_radius=3)
+                    ys, xs = np.where(refined_mask)
+                    if len(ys) == 0:
+                        continue
                     y1m, y2m = ys.min(), ys.max()
                     x1m, x2m = xs.min(), xs.max()
                     cropped = rgba[y1m:y2m+1, x1m:x2m+1]
