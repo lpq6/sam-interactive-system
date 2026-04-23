@@ -28,6 +28,13 @@ DEMO_RESULTS = [
         ]
     },
     {
+        "image": "000000070774.jpg",
+        "scene": "摩托车",
+        "objects": [
+            {"yolo": "motorcycle", "resnet": "moped", "confidence": 0.854, "matched": True},
+        ]
+    },
+    {
         "image": "000000093437.jpg",
         "scene": "办公桌",
         "objects": [
