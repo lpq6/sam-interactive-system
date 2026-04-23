@@ -192,6 +192,175 @@ class ImageClassifier:
 
 classifier = ImageClassifier()
 
+# ── YOLO 目标检测模型（COCO 80 类） ──
+class YOLODetector:
+    def __init__(self):
+        self.model = None
+        self.names = {}  # class_id -> class_name
+        self.device = "cpu"
+
+    def load(self) -> bool:
+        try:
+            # WSL + Windows Python 兼容性补丁
+            import builtins
+            _orig_open = builtins.open
+            def _patched_open(path, *a, **kw):
+                if path == '/etc/os-release':
+                    raise FileNotFoundError(path)
+                return _orig_open(path, *a, **kw)
+            builtins.open = _patched_open
+
+            from ultralytics import YOLO
+            model_path = Path(__file__).parent / "yolov8n.pt"
+            if not model_path.exists():
+                print(f"[WARN] YOLO model not found: {model_path}")
+                return False
+
+            # WSL 路径兼容: /mnt/d/... → D:\...
+            model_path_str = str(model_path)
+            if model_path_str.startswith("/mnt/"):
+                drive = model_path_str[5]
+                rest = model_path_str[7:].replace("/", "\\")
+                model_path_str = f"{drive}:\\{rest}"
+
+            self.model = YOLO(model_path_str)
+            self.names = self.model.names
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"[OK] YOLOv8n loaded on {self.device}, {len(self.names)} classes")
+            return True
+        except ImportError:
+            print("[WARN] ultralytics not installed, YOLO detection disabled")
+            return False
+        except Exception as e:
+            print(f"[WARN] YOLO load failed: {e}")
+            return False
+
+    def detect(self, img: np.ndarray, conf_thresh: float = 0.25, max_det: int = 30) -> list:
+        """
+        YOLO 检测，返回 [{label, confidence, bbox, class_id}]
+        """
+        if not self.model:
+            return []
+        results = self.model.predict(
+            source=img, conf=conf_thresh, max_det=max_det,
+            verbose=False, device=self.device
+        )
+        detections = []
+        if results and len(results) > 0:
+            r = results[0]
+            if r.boxes is not None:
+                for box in r.boxes:
+                    cls_id = int(box.cls[0])
+                    conf = float(box.conf[0])
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int).tolist()
+                    detections.append({
+                        "label": self.names.get(cls_id, f"class_{cls_id}"),
+                        "confidence": round(conf, 3),
+                        "bbox": [x1, y1, x2, y2],
+                        "class_id": cls_id,
+                    })
+        return detections
+
+yolo = YOLODetector()
+
+def yolo_sam_detect(img: np.ndarray, conf_thresh: float = 0.25, max_det: int = 30,
+                     min_area: int = 100, overlay_alpha: float = 0.4) -> dict:
+    """
+    YOLO 检测 + SAM 分割联合流水线:
+    1. YOLO 检测 bbox + label + confidence
+    2. SAM 用 bbox 做精确分割
+    3. 用 YOLO 标签（COCO 80 类，准确）
+    """
+    h, w = img.shape[:2]
+    colors = [
+        (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0),
+        (255, 0, 255), (0, 255, 255), (128, 0, 255), (255, 128, 0),
+        (0, 128, 255), (128, 255, 0), (255, 0, 128), (0, 255, 128),
+        (255, 192, 0), (192, 0, 255), (0, 192, 255), (255, 64, 64),
+    ]
+
+    # Step 1: YOLO detection
+    yolo_dets = yolo.detect(img, conf_thresh=conf_thresh, max_det=max_det)
+    if not yolo_dets:
+        return {"success": True, "count": 0, "detections": [], "overlay": None, "method": "yolo+sam"}
+
+    # Step 2: SAM segmentation for each YOLO bbox
+    sam.set_image(img)
+    overlay = img.copy().astype(np.float32)
+    detections = []
+
+    for i, det in enumerate(yolo_dets):
+        x1, y1, x2, y2 = det["bbox"]
+        area = (x2 - x1) * (y2 - y1)
+        if area < min_area:
+            continue
+
+        # SAM box segmentation
+        box_np = np.array([x1, y1, x2, y2])
+        try:
+            masks, scores = sam.predict_box(box_np)
+            best_idx = int(np.argmax(scores))
+            mask = masks[best_idx]
+            sam_score = float(scores[best_idx])
+        except Exception:
+            # Fallback: 用 bbox 直接生成掩码
+            mask = np.zeros((h, w), dtype=bool)
+            mask[y1:y2, x1:x2] = True
+            sam_score = 0.5
+
+        mask_area = int(mask.sum())
+        if mask_area < min_area:
+            continue
+
+        # 重新计算掩码 bbox（更精确）
+        ys, xs = np.where(mask)
+        if len(ys) > 0:
+            mask_bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
+        else:
+            mask_bbox = det["bbox"]
+
+        # 叠加颜色
+        color = colors[i % len(colors)]
+        mask_3d = np.stack([mask]*3, axis=-1)
+        color_arr = np.array(color, dtype=np.float32)
+        overlay = np.where(mask_3d,
+                         overlay * (1 - overlay_alpha) + color_arr * overlay_alpha,
+                         overlay)
+
+        # 生成单个掩码的 base64
+        single_mask_b64 = mask_to_base64(mask)
+
+        detections.append({
+            "id": i + 1,
+            "label": det["label"],
+            "confidence": det["confidence"],  # YOLO 的置信度（COCO 类别，准确！）
+            "mask": single_mask_b64,
+            "bbox": mask_bbox,
+            "area": mask_area,
+            "score": sam_score,
+            "class_id": det["class_id"],
+            "source": "yolo+sam",
+        })
+
+    # 按置信度排序
+    detections.sort(key=lambda x: x['confidence'], reverse=True)
+    for i, d in enumerate(detections):
+        d['id'] = i + 1
+
+    # 生成叠加图
+    overlay_img = Image.fromarray(overlay.astype(np.uint8))
+    buf = io.BytesIO()
+    overlay_img.save(buf, format="PNG")
+    overlay_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    return {
+        "success": True,
+        "count": len(detections),
+        "detections": detections,
+        "overlay": overlay_b64,
+        "method": "yolo+sam",
+    }
+
 # ── 图像工具 ──
 def crop_object_with_mask(img: np.ndarray, mask: np.ndarray, margin: int = 10) -> Image.Image:
     """
@@ -492,7 +661,10 @@ async def health():
         "status": "ok",
         "device": sam.device,
         "model_loaded": sam.predictor is not None,
-        "model_type": sam.model_type
+        "model_type": sam.model_type,
+        "yolo_loaded": yolo.model is not None,
+        "yolo_classes": len(yolo.names) if yolo.names else 0,
+        "resnet_loaded": classifier.model is not None,
     }
 
 @app.get("/api/models")
@@ -591,55 +763,51 @@ async def upload_batch(files: List[UploadFile] = File(...)):
 @app.post("/api/batch/process")
 async def batch_process(image_ids: List[str], min_confidence: float = 0.3):
     """
-    批量处理图片 - 自动检测 + 识别
-    
-    参数:
-        image_ids: 图片 ID 列表
-        min_confidence: 最低置信度阈值
-    
-    返回:
-        每张图片的检测结果
+    批量处理图片 - YOLO 检测 + SAM 分割（COCO 80 类）
     """
     results = []
-    
     for image_id in image_ids:
         path = find_image(image_id)
         if not path:
             results.append({"image_id": image_id, "success": False, "error": "图片不存在"})
             continue
-        
         try:
             img = np.array(Image.open(path).convert("RGB"))
+
+            # 优先 YOLO+SAM
+            if yolo.model:
+                res = yolo_sam_detect(img, conf_thresh=max(0.25, min_confidence), max_det=15, min_area=500)
+                results.append({
+                    "image_id": image_id,
+                    "success": True,
+                    "detections": res.get("detections", []),
+                    "count": res.get("count", 0),
+                    "method": "yolo+sam",
+                })
+                continue
+
+            # Fallback: 网格采样 + ResNet
             h, w = img.shape[:2]
             sam.set_image(img)
-            
-            # 网格采样点
             step = max(w, h) // 20
             step = max(step, 40)
-            
             detections = []
             used_masks = []
             generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
-            
             for y in range(step//2, h, step):
                 for x in range(step//2, w, step):
                     if len(detections) >= 10:
                         break
-                    
                     try:
                         masks, scores, _ = sam.predictor.predict(
                             point_coords=np.array([[x, y]]),
                             point_labels=np.array([1]),
                             multimask_output=False
                         )
-                        
                         mask = masks[0]
                         area = int(mask.sum())
-                        
                         if area < 500:
                             continue
-                        
-                        # 检查重复
                         is_duplicate = False
                         for used in used_masks:
                             overlap = (mask & used).sum() / min(mask.sum(), used.sum())
@@ -648,14 +816,9 @@ async def batch_process(image_ids: List[str], min_confidence: float = 0.3):
                                 break
                         if is_duplicate:
                             continue
-                        
                         used_masks.append(mask)
-                        
-                        # 计算边界框
                         ys, xs = np.where(mask)
                         bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
-                        
-                        # 用 ResNet 识别（掩码裁剪 + top_k=5）
                         region_label = "未知"
                         region_prob = 0.0
                         if classifier.model:
@@ -673,31 +836,26 @@ async def batch_process(image_ids: List[str], min_confidence: float = 0.3):
                                         region_prob = result[0]["prob"]
                             except:
                                 pass
-                        
-                        # 跳过低置信度
                         if region_prob < min_confidence or region_label in generic_labels:
                             continue
-                        
                         detections.append({
                             "label": region_label,
                             "confidence": round(region_prob, 3),
                             "bbox": bbox,
-                            "area": area
+                            "area": area,
+                            "source": "grid+resnet",
                         })
-                        
                     except Exception:
                         continue
-            
             results.append({
                 "image_id": image_id,
                 "success": True,
                 "detections": detections,
-                "count": len(detections)
+                "count": len(detections),
+                "method": "grid+resnet",
             })
-            
         except Exception as e:
             results.append({"image_id": image_id, "success": False, "error": str(e)})
-    
     return {
         "success": True,
         "total": len(results),
@@ -897,20 +1055,26 @@ async def segment_multi(req: MultiMaskRequest):
 
 @app.post("/api/detect/auto")
 async def auto_detect(req: AutoDetectRequest):
-    """自动检测 - 使用网格采样检测图中所有物体"""
+    """自动检测 - YOLO 检测 + SAM 分割（COCO 80 类标签）"""
     path = find_image(req.image_id)
     if not path:
         raise HTTPException(404, "请先上传图片")
 
     img = np.array(Image.open(path).convert("RGB"))
-    h, w = img.shape[:2]
 
+    # 优先使用 YOLO+SAM 流水线
+    if yolo.model:
+        result = yolo_sam_detect(img, conf_thresh=0.25, max_det=30, min_area=req.min_mask_region_area)
+        if result["count"] > 0:
+            return result
+        # YOLO 没检测到，fall through 到网格采样
+
+    # Fallback: 网格采样 + ResNet（旧方法）
+    h, w = img.shape[:2]
     try:
         sam.predictor.set_image(img)
-
-        # 网格采样点
         step = max(w, h) // req.points_per_side
-        step = max(step, 30)  # 最小间距
+        step = max(step, 30)
 
         detections = []
         colors = [
@@ -923,28 +1087,21 @@ async def auto_detect(req: AutoDetectRequest):
         used_masks = []
         detection_id = 0
 
-        # 在网格点上进行分割
         for y in range(step//2, h, step):
             for x in range(step//2, w, step):
-                if detection_id >= 15:  # 最多15个
+                if detection_id >= 15:
                     break
-
                 try:
                     masks, scores, _ = sam.predictor.predict(
                         point_coords=np.array([[x, y]]),
                         point_labels=np.array([1]),
                         multimask_output=False
                     )
-
                     mask = masks[0]
                     score = float(scores[0])
-
-                    # 过滤太小的区域
                     area = int(mask.sum())
                     if area < req.min_mask_region_area:
                         continue
-
-                    # 检查是否与已有掩码重叠过多
                     is_duplicate = False
                     for used in used_masks:
                         overlap = (mask & used).sum() / min(mask.sum(), used.sum())
@@ -953,15 +1110,10 @@ async def auto_detect(req: AutoDetectRequest):
                             break
                     if is_duplicate:
                         continue
-
                     used_masks.append(mask)
                     detection_id += 1
-
-                    # 计算边界框
                     ys, xs = np.where(mask)
                     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
-
-                    # 用 ResNet 识别该区域（掩码裁剪，白底去背景干扰）
                     region_label = "未知"
                     region_prob = 0.0
                     if classifier.model:
@@ -969,7 +1121,6 @@ async def auto_detect(req: AutoDetectRequest):
                             crop_pil = crop_object_with_mask(img, mask, margin=10)
                             result = classifier.classify(crop_pil, top_k=5)
                             if result:
-                                # 遍历备选标签，找第一个非泛化标签
                                 generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
                                 for r in result:
                                     if r["prob"] >= 0.15 and r["label"] not in generic_labels:
@@ -977,29 +1128,19 @@ async def auto_detect(req: AutoDetectRequest):
                                         region_prob = r["prob"]
                                         break
                                 else:
-                                    # 全是泛化标签，用第一个
                                     region_label = result[0]["label"]
                                     region_prob = result[0]["prob"]
                         except:
                             pass
-
-                    # 跳过低置信度的泛化标签
                     generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
                     if region_prob < 0.15 or region_label in generic_labels:
                         continue
-
-                    # 叠加颜色
                     color = colors[detection_id % len(colors)]
                     alpha = 0.4
                     mask_3d = np.stack([mask]*3, axis=-1)
                     color_arr = np.array(color, dtype=np.float32)
-                    overlay = np.where(mask_3d,
-                                     overlay * (1 - alpha) + color_arr * alpha,
-                                     overlay)
-
-                    # 生成单个掩码的 base64
+                    overlay = np.where(mask_3d, overlay * (1 - alpha) + color_arr * alpha, overlay)
                     single_mask_b64 = mask_to_base64(mask)
-
                     detections.append({
                         "id": detection_id,
                         "label": region_label,
@@ -1008,83 +1149,94 @@ async def auto_detect(req: AutoDetectRequest):
                         "bbox": bbox,
                         "area": area,
                         "score": score,
+                        "source": "grid+resnet",
                     })
-
                 except Exception:
                     continue
 
-        # 按面积排序
         detections.sort(key=lambda x: x['area'], reverse=True)
         for i, d in enumerate(detections):
             d['id'] = i + 1
-
-        # 生成叠加图
         overlay_b64 = Image.fromarray(overlay.astype(np.uint8))
         buf = io.BytesIO()
         overlay_b64.save(buf, format="PNG")
         overlay_str = base64.b64encode(buf.getvalue()).decode()
-
         return {
             "success": True,
             "count": len(detections),
             "detections": detections,
-            "overlay": overlay_str
+            "overlay": overlay_str,
+            "method": "grid+resnet",
         }
-
     except Exception as e:
         return {"success": False, "message": str(e)}
 
 
 @app.post("/api/segment/auto")
 async def auto_segment(req: AutoSegmentRequest):
-    """自动分割 - 检测并分割图中所有物体，返回每个物体的掩码"""
+    """自动分割 - YOLO 检测 + SAM 精确分割（COCO 80 类）"""
     path = find_image(req.image_id)
     if not path:
         raise HTTPException(404, "请先上传图片")
 
     img = np.array(Image.open(path).convert("RGB"))
-    h, w = img.shape[:2]
 
+    # 优先使用 YOLO+SAM 流水线
+    if yolo.model:
+        result = yolo_sam_detect(img, conf_thresh=0.25, max_det=req.max_objects,
+                                  min_area=req.min_mask_region_area, overlay_alpha=0.5)
+        if result["count"] > 0:
+            # 给每个检测加上边界框绘制
+            overlay = np.array(Image.open(io.BytesIO(base64.b64decode(result["overlay"])))).astype(np.float32)
+            for det in result["detections"]:
+                x1, y1, x2, y2 = det["bbox"]
+                # 从 label 索引取颜色
+                colors_seg = [
+                    (255, 50, 50), (50, 255, 50), (50, 50, 255), (255, 255, 50),
+                    (255, 50, 255), (50, 255, 255), (255, 128, 0), (128, 0, 255),
+                    (0, 255, 128), (255, 0, 128), (128, 255, 0), (0, 128, 255),
+                ]
+                color = np.array(colors_seg[det["id"] % len(colors_seg)], dtype=np.float32)
+                overlay[y1:y1+3, x1:x2] = color
+                overlay[y2-3:y2, x1:x2] = color
+                overlay[y1:y2, x1:x1+3] = color
+                overlay[y1:y2, x2-3:x2] = color
+            overlay_img = Image.fromarray(overlay.astype(np.uint8))
+            buf = io.BytesIO()
+            overlay_img.save(buf, format="PNG")
+            result["overlay"] = base64.b64encode(buf.getvalue()).decode()
+            return result
+
+    # Fallback: 网格采样 + ResNet（旧方法）
+    h, w = img.shape[:2]
     try:
         sam.predictor.set_image(img)
-
-        # 网格采样点
         step = max(w, h) // req.points_per_side
         step = max(step, 40)
-
         detections = []
         colors = [
             (255, 50, 50), (50, 255, 50), (50, 50, 255), (255, 255, 50),
             (255, 50, 255), (50, 255, 255), (255, 128, 0), (128, 0, 255),
             (0, 255, 128), (255, 0, 128), (128, 255, 0), (0, 128, 255),
         ]
-
         overlay = img.copy().astype(np.float32)
         used_masks = []
         detection_id = 0
-
-        # 在网格点上进行分割
         for y in range(step//2, h, step):
             for x in range(step//2, w, step):
                 if detection_id >= req.max_objects:
                     break
-
                 try:
                     masks, scores, _ = sam.predictor.predict(
                         point_coords=np.array([[x, y]]),
                         point_labels=np.array([1]),
                         multimask_output=False
                     )
-
                     mask = masks[0]
                     score = float(scores[0])
                     area = int(mask.sum())
-
-                    # 过滤太小的区域
                     if area < req.min_mask_region_area:
                         continue
-
-                    # 检查是否与已有掩码重叠过多
                     is_duplicate = False
                     for used in used_masks:
                         overlap = (mask & used).sum() / min(mask.sum(), used.sum())
@@ -1093,15 +1245,10 @@ async def auto_segment(req: AutoSegmentRequest):
                             break
                     if is_duplicate:
                         continue
-
                     used_masks.append(mask)
                     detection_id += 1
-
-                    # 计算边界框
                     ys, xs = np.where(mask)
                     bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
-
-                    # 用 ResNet 识别该区域（掩码裁剪，白底去背景干扰）
                     region_label = "未知"
                     region_prob = 0.0
                     if classifier.model:
@@ -1118,33 +1265,22 @@ async def auto_segment(req: AutoSegmentRequest):
                                 else:
                                     region_label = result[0]["label"]
                                     region_prob = result[0]["prob"]
-                        except Exception as e:
+                        except:
                             pass
-
-                    # 跳过低置信度的泛化标签
                     generic_labels = {"未知", "冷色物体", "暖色物体", "区域-light", "区域-dark"}
                     if region_prob < 0.15 or region_label in generic_labels:
                         continue
-
-                    # 叠加颜色
                     color = colors[detection_id % len(colors)]
                     alpha = 0.5
                     mask_3d = np.stack([mask]*3, axis=-1)
                     color_arr = np.array(color, dtype=np.float32)
-                    overlay = np.where(mask_3d,
-                                     overlay * (1 - alpha) + color_arr * alpha,
-                                     overlay)
-
-                    # 绘制边界框
+                    overlay = np.where(mask_3d, overlay * (1 - alpha) + color_arr * alpha, overlay)
                     x1, y1, x2, y2 = bbox
-                    overlay[y1:y1+3, x1:x2] = color_arr  # 上边
-                    overlay[y2-3:y2, x1:x2] = color_arr  # 下边
-                    overlay[y1:y2, x1:x1+3] = color_arr  # 左边
-                    overlay[y1:y2, x2-3:x2] = color_arr  # 右边
-
-                    # 生成单个掩码的 base64
+                    overlay[y1:y1+3, x1:x2] = color_arr
+                    overlay[y2-3:y2, x1:x2] = color_arr
+                    overlay[y1:y2, x1:x1+3] = color_arr
+                    overlay[y1:y2, x2-3:x2] = color_arr
                     single_mask_b64 = mask_to_base64(mask)
-
                     detections.append({
                         "id": detection_id,
                         "label": region_label,
@@ -1153,29 +1289,24 @@ async def auto_segment(req: AutoSegmentRequest):
                         "bbox": bbox,
                         "area": area,
                         "score": score,
+                        "source": "grid+resnet",
                     })
-
                 except Exception:
                     continue
-
-        # 按面积排序
         detections.sort(key=lambda x: x['area'], reverse=True)
         for i, d in enumerate(detections):
             d['id'] = i + 1
-
-        # 生成叠加图
         overlay_b64 = Image.fromarray(overlay.astype(np.uint8))
         buf = io.BytesIO()
         overlay_b64.save(buf, format="PNG")
         overlay_str = base64.b64encode(buf.getvalue()).decode()
-
         return {
             "success": True,
             "count": len(detections),
             "detections": detections,
-            "overlay": overlay_str
+            "overlay": overlay_str,
+            "method": "grid+resnet",
         }
-
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -3386,6 +3517,9 @@ for mt in ["vit_b", "vit_l", "vit_h"]:
 
 # 加载 ResNet 识别模型
 classifier.load()
+
+# 加载 YOLO 检测模型
+yolo.load()
 
 if __name__ == "__main__":
     import uvicorn
